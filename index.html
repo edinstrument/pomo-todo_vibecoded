@@ -1028,31 +1028,65 @@ function caffTotal(d){return (dayMeta(d).caffeine||[]).reduce((t,c)=>t+(c.mg||0)
 
 let tickId=null;
 function plannedNow(){return S.running?S.running.planned:S.settings.defaultMinutes;}
+// 타이머가 마지막으로 살아 있던 시각 (페이지가 꺼져 있던 구간을 알아내는 용도)
+const SEEN_KEY="running-seen";
+function markSeen(){try{localStorage.setItem(SEEN_KEY,String(Date.now()));}catch(e){}}
+function lastSeen(){try{const v=parseInt(localStorage.getItem(SEEN_KEY)||"",10);return Number.isFinite(v)?v:null;}catch(e){return null;}}
+// 집중 시간 = (지금 - 시작 시각) - 정지했던 시간.
+// 1초씩 세서 쌓지 않고 매번 시각으로 계산 → 페이지가 꺼졌다 켜져도 시간이 안 사라짐
+function focusMs(r,now){if(!r)return 0;now=now||Date.now();
+  const p=(r.pausedMs||0)+((r.paused&&r.pauseStart)?(now-r.pauseStart):0);
+  return Math.max(0,now-r.start-p);}
 function startTimer(){
-  S.running={start:Date.now(), planned:S.settings.defaultMinutes, elapsedMs:0, paused:false,
-    pauses:0, pausedMs:0, pauseStart:null, lastTick:Date.now(), subject:S.sel.subject, load:S.sel.load, cond:S.sel.cond, dips:[]};
-  save();runTick();renderTimer();
+  S.running={start:Date.now(), planned:S.settings.defaultMinutes, paused:false,
+    pauses:0, pausedMs:0, pauseStart:null, subject:S.sel.subject, load:S.sel.load, cond:S.sel.cond, dips:[]};
+  save();markSeen();runTick();renderTimer();
 }
-function pauseTimer(){if(!S.running||S.running.paused)return;accumulate();S.running.paused=true;S.running.pauses++;S.running.pauseStart=Date.now();save();renderTimer();}
+function pauseTimer(){if(!S.running||S.running.paused)return;S.running.paused=true;S.running.pauses++;S.running.pauseStart=Date.now();save();renderTimer();}
 function resumeTimer(){if(!S.running||!S.running.paused)return;
   if(S.running.pauseStart){S.running.pausedMs=(S.running.pausedMs||0)+(Date.now()-S.running.pauseStart);S.running.pauseStart=null;}
-  S.running.paused=false;S.running.lastTick=Date.now();save();runTick();renderTimer();}
-function markDip(){if(!S.running)return;accumulate();const m=Math.max(1,Math.round(S.running.elapsedMs/60000));
+  S.running.paused=false;save();markSeen();runTick();renderTimer();}
+function markDip(){if(!S.running)return;const m=Math.max(1,Math.round(focusMs(S.running)/60000));
   if(!Array.isArray(S.running.dips))S.running.dips=[];S.running.dips.push(m);save();renderTimer();toast("딥 기록: "+S.running.dips.join(", ")+"분");beep(1);}
-function accumulate(){if(!S.running||S.running.paused)return;const n=Date.now();S.running.elapsedMs+=n-S.running.lastTick;S.running.lastTick=n;}
 function runTick(){if(tickId)return;tickId=setInterval(()=>{
   if(!S.running||S.running.paused){clearInterval(tickId);tickId=null;return;}
-  accumulate();
-  if(S.running.elapsedMs>=S.running.planned*60000){clearInterval(tickId);tickId=null;beep(2);notify("세션 완료","계획한 시간이 끝났어요");renderTimer();openEnd("full");return;}
-  if(Date.now()%3000<1000)save();
+  markSeen();
+  if(focusMs(S.running)>=S.running.planned*60000){clearInterval(tickId);tickId=null;beep(2);notify("세션 완료","계획한 시간이 끝났어요");renderTimer();openEnd("full");return;}
   renderTimer();
 },1000);}
+// 페이지가 꺼졌다 다시 열렸을 때 진행 중이던 세션 이어받기
+function restoreRunning(){
+  const r=S.running; if(!r)return;
+  // 백그라운드 탭에선 확인창이 제대로 안 뜰 수 있으니, 화면에 보일 때까지 기다렸다가 처리
+  if(document.hidden){const h=()=>{if(!document.hidden){document.removeEventListener("visibilitychange",h);restoreRunning();}};
+    document.addEventListener("visibilitychange",h);return;}
+  const now=Date.now();
+  let seen=lastSeen(); if(seen==null||seen<r.start) seen=r.lastTick||r.start;   // 기록 없으면 이전 버전 값으로
+  seen=Math.min(seen,now);
+  if(r.paused){
+    if(!r.pauseStart) r.pauseStart=seen;   // 이전 버전에서 넘어온 '정지인데 정지 시작 시각 없음' 보정
+    save();renderTimer();toast("진행 중이던 세션을 이어받았어요 (일시정지 상태)");return;
+  }
+  const gap=now-seen;
+  if(gap>=2*60000){
+    const include=confirm("세션이 진행 중일 때 페이지가 꺼져 있었어요.\n"
+      +clockOf(seen)+" → "+clockOf(now)+" ("+Math.round(gap/60000)+"분)\n\n"
+      +"이 시간도 공부 시간에 넣을까요?\n\n"
+      +"확인 = 넣기 (타이머 그대로 계속)\n"
+      +"취소 = 빼기 ("+clockOf(seen)+"부터 정지로 처리)");
+    if(!include){
+      r.paused=true;r.pauses=(r.pauses||0)+1;r.pauseStart=seen;
+      save();renderTimer();toast("꺼져 있던 시간은 정지로 처리했어요 · 계속을 누르면 이어서 재요");return;
+    }
+  }
+  save();markSeen();runTick();renderTimer();toast("진행 중이던 세션을 이어서 재고 있어요");
+}
 
 let endSel={reason:null,heat:null,onset:null,quality:null};
 function buildOnsetChips(container,maxMin){container.innerHTML="";const mx=Math.max(40,maxMin);
   for(let m=5;m<=mx;m+=5){const c=document.createElement("div");c.className="chip sm warm";c.dataset.on=m;c.textContent=m+"분"+(m===mx?"+":"");container.appendChild(c);}}
 function openEnd(pre){
-  if(!S.running)return;accumulate();
+  if(!S.running)return;
   endSel={reason:pre||null,heat:null,onset:null,quality:null};
   buildOnsetChips($("#onsetChips"),S.running.planned);
   $$("#reasonChips .chip").forEach(c=>c.classList.toggle("on",c.dataset.r===endSel.reason));
@@ -1061,9 +1095,7 @@ function openEnd(pre){
   $$("#heatChips .chip").forEach(c=>c.classList.remove("on"));
   $$("#qualChips .chip").forEach(c=>c.classList.remove("on"));
   $("#endNote").value="";$("#endNote").style.display="none";$("#noteToggle").textContent="+ 메모 (선택)";
-  const _now=Date.now();
-  let _pt=(S.running.pausedMs||0)+((S.running.paused&&S.running.pauseStart)?(_now-S.running.pauseStart):0);
-  const el=fmtMMSS(Math.max(0,_now-S.running.start-_pt));
+  const el=fmtMMSS(focusMs(S.running));
   $("#endElapsed").textContent=`집중 ${el.m}분 ${pad(el.s)}초 · ${LOAD[S.running.load]} · ${S.running.subject}`
     +(S.running.pauses?` · 정지 ${S.running.pauses}회`:"")+((S.running.dips&&S.running.dips.length)?` · 딥 ${S.running.dips.join(",")}분`:"");
   $("#discardHint").innerHTML="";$("#cancelEnd").dataset.armed="";
@@ -1076,8 +1108,7 @@ function commitEnd(){
   if(endSel.reason==="cut"&&!endSel.heat){toast("과열감 여부를 골라주세요");return;}
   if(endSel.reason==="cut"&&endSel.heat==="yes"&&!endSel.onset){toast("과열 시작 시점을 골라주세요");return;}
   const r=S.running, endT=Date.now();
-  let pausedTotal=(r.pausedMs||0)+((r.paused&&r.pauseStart)?(endT-r.pauseStart):0);
-  const actual=Math.max(1,Math.round((endT-r.start-pausedTotal)/60000));
+  const actual=Math.max(1,Math.round(focusMs(r,endT)/60000));
   S.sessions.push({id:uid(), start:r.start, end:endT, planned:r.planned, actual,
     pauses:r.pauses, subject:r.subject, load:r.load, cond:r.cond,
     reason:endSel.reason, heat:endSel.reason==="cut"?endSel.heat:null,
@@ -1145,12 +1176,12 @@ function renderTimer(){
     $("#controls").innerHTML='<button class="act b-go" id="btnStart">시작</button>';
     $("#btnStart").onclick=startTimer;$("#setupCard").classList.remove("dim");return;
   }
-  const pMs=planned*60000, remain=Math.max(0,pMs-S.running.elapsedMs), t=fmtMMSS(remain);
+  const f=focusMs(S.running), pMs=planned*60000, remain=Math.max(0,pMs-f), t=fmtMMSS(remain);
   $("#clock").innerHTML=t.m+'<small>:'+pad(t.s)+'</small>';
   $("#csub").textContent=(S.running.paused?"⏸ 일시정지 · ":"")+S.running.subject+" · "+LOAD[S.running.load]
     +(S.running.pauses?` · 정지 ${S.running.pauses}`:"")+((S.running.dips&&S.running.dips.length)?` · 딥 ${S.running.dips.join(",")}분`:"");
-  fill.style.width=Math.min(100,S.running.elapsedMs/pMs*100)+"%";
-  track.classList.toggle("hot",S.running.elapsedMs/pMs>0.6);
+  fill.style.width=Math.min(100,f/pMs*100)+"%";
+  track.classList.toggle("hot",f/pMs>0.6);
   renderDipMarks(track,(S.running.dips||[]),planned);
   $("#setupCard").classList.add("dim");
   if(S.running.paused){
@@ -1505,8 +1536,6 @@ function wire(){
   $("#restUp").onclick=()=>setRest(restPlanned()+1);
   $("#restVal").addEventListener("input",e=>{const n=parseInt(e.target.value,10);if(!isNaN(n)){S.settings.restMinutes=Math.max(1,Math.min(600,n));save();if(!rest.running)renderRest();}});
   $("#restVal").addEventListener("blur",()=>{$("#restVal").value=S.settings.restMinutes;});
-
-  if(S.running){if(!S.running.paused)S.running.paused=true;toast("진행 중이던 세션을 이어받았어요 (일시정지)");}
 }
 
 /* ===================== 클라우드 동기화 (Supabase) ===================== */
@@ -1540,7 +1569,7 @@ function applyBundleToStorage(p){
     const merged=Object.assign(defaultState(),tracker);
     merged.settings=Object.assign(defaultState().settings,tracker.settings||{});
     merged.sel=Object.assign(defaultState().sel,tracker.sel||{});
-    merged.running=null;
+    merged.running=S.running||null;   // 클라우드 데이터를 받아와도 이 기기에서 돌던 세션은 유지
     localStorage.setItem(KEY, JSON.stringify(merged));
     if(p && p.format==="study-hub-backup" && p.todo){
       if(p.todo.exercise) localStorage.setItem("exercise-rotation-grid", JSON.stringify(p.todo.exercise));
@@ -1662,7 +1691,7 @@ function onHidePush(){ if(sbUser){ const j=bundleDataJSON(); if(j!==lastWatchJSO
 loadSaved();applyTheme();
 $("#autostatus").className="status "+(AUTOSAVE?"on":"off");
 $("#autostatus").textContent=AUTOSAVE?"자동저장 ON":"미리보기·수동백업";
-wire();renderAll();initSync();
+wire();renderAll();restoreRunning();initSync();
 </script>
 <script>
 
