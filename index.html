@@ -5,555 +5,376 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>세션 추적기</title>
 <style>
+  /* Pretendard: 토스 앱 같은 한글 UI에 많이 쓰는 무료 글꼴 (못 불러오면 기기 기본 글꼴로) */
+  @import url("https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css");
+
+  /* ── 색·글꼴 토큰 ── */
   :root{
-    --mono:"SF Mono","JetBrains Mono","Cascadia Code",Consolas,"D2Coding",ui-monospace,monospace;
-    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;
-    --r:12px;
-    --cool:#2fd4c0; --warm:#f0a24b; --red:#f0645f; --good:#7fd98a; --violet:#b49bf0;
-  }
-  html[data-theme="dark"]{
-    --bg:#0f141b; --grad:radial-gradient(1200px 600px at 50% -200px, #16202c 0%, #0f141b 60%);
-    --surface:#161d27; --surface2:#1d2632; --raise:#26313f;
-    --border:#28313d; --hair:#222b36;
-    --text:#eaf0f8; --muted:#93a1b3; --faint:#5f6b7c;
-    --chip:#1d2632; --chipon:#123b38; --shadow:0 1px 0 rgba(255,255,255,.02), 0 8px 24px rgba(0,0,0,.35);
-    --cool-ink:#052e29; --warm-ink:#301a06;
+    --sans:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic","Segoe UI",Roboto,sans-serif;
+    --mono:var(--sans);   /* 숫자도 같은 글꼴 + 자리 고정 숫자(tabular) */
+    --code:ui-monospace,"SF Mono",Consolas,"D2Coding",monospace;
+    --r-card:24px; --r-ctl:14px; --r-chip:12px;
+    --cool-ink:#ffffff;
   }
   html[data-theme="light"]{
-    --bg:#f4f6f9; --grad:radial-gradient(1200px 600px at 50% -200px, #ffffff 0%, #eef1f5 60%);
-    --surface:#ffffff; --surface2:#f2f5f8; --raise:#e7ecf2;
-    --border:#dde3ea; --hair:#e8edf2;
-    --text:#131a22; --muted:#5c6a7a; --faint:#9aa7b6;
-    --chip:#f2f5f8; --chipon:#d6f5f0; --shadow:0 1px 2px rgba(16,24,40,.06), 0 6px 20px rgba(16,24,40,.08);
-    --cool:#12b3a1; --warm:#d9852f; --red:#d94a45; --good:#3fa64f; --violet:#8a6fe0;
-    --cool-ink:#053c36; --warm-ink:#3a2409;
+    --bg:#f2f4f6; --surface:#ffffff; --surface2:#f2f4f6; --raise:#e5e8eb; --seg:#e5e8eb;
+    --border:#e5e8eb; --hair:#f2f4f6;
+    --text:#191f28; --text2:#333d4b; --muted:#6b7684; --faint:#8b95a1;
+    --cool:#3182f6; --cool-strong:#1b64da; --chipon:#e8f3ff; --cool-soft:#90c2ff;
+    --warm:#fe9800; --warm-text:#d26a00; --warm-weak:#fff3e0; --warm-ink:#fff3e0;
+    --red:#f04452; --red-weak:#ffeeee;
+    --good:#03b26c; --good-weak:#e5f8ef;
+    --violet:#8b5cf6; --violet-weak:#f1ebfe;
+    --tip:#333d4b; --scrim:rgba(0,19,43,.48);
+    --ring:#d1d6db;
+    --lv1:#d3e5fe; --lv1-text:#1b64da; --lv2:#3182f6; --lv3:#1b64da; --lv4:#0d3e8f; --lv4-text:#ffffff;
+    --shadow:0 2px 8px rgba(0,27,55,.06);
+    color-scheme:light;
   }
+  html[data-theme="dark"]{
+    --bg:#131317; --surface:#1e1e24; --surface2:#2a2a31; --raise:#34343c; --seg:#26262d;
+    --border:#2e2e36; --hair:#26262d;
+    --text:#f2f3f5; --text2:#d4d5da; --muted:#a2a4ad; --faint:#74767f;
+    --cool:#4593fc; --cool-strong:#6aaaff; --chipon:rgba(69,147,252,.17); --cool-soft:#2c5a99;
+    --warm:#ffa53d; --warm-text:#ffb663; --warm-weak:rgba(255,165,61,.15); --warm-ink:rgba(255,165,61,.15);
+    --red:#ff5c69; --red-weak:rgba(255,92,105,.15);
+    --good:#2fca86; --good-weak:rgba(47,202,134,.15);
+    --violet:#a98bff; --violet-weak:rgba(169,139,255,.16);
+    --tip:#45454f; --scrim:rgba(0,0,0,.62);
+    --ring:#43434d;
+    --lv1:#233a5c; --lv1-text:#a8ccff; --lv2:#2c66c4; --lv3:#4593fc; --lv4:#a6ceff; --lv4-text:#0b2350;
+    --shadow:0 2px 10px rgba(0,0,0,.35);
+    color-scheme:dark;
+  }
+
+  /* ── 기본 ── */
   *{box-sizing:border-box}
   html,body{margin:0; padding:0}
-  body{background:var(--bg); background-image:var(--grad); background-attachment:fixed;
-    color:var(--text); font-family:var(--sans); font-size:15px; line-height:1.5;
-    -webkit-font-smoothing:antialiased; padding-bottom:44px; transition:background-color .2s,color .2s}
-  .wrap{max-width:540px; margin:0 auto; padding:0 15px}
+  body{background:var(--bg); color:var(--text); font-family:var(--sans); font-size:15px; line-height:1.5;
+    letter-spacing:-.01em; -webkit-font-smoothing:antialiased; -webkit-tap-highlight-color:transparent;
+    padding-bottom:48px; font-variant-numeric:tabular-nums; transition:background-color .2s,color .2s}
+  button,input,textarea,select{font-family:inherit; letter-spacing:inherit}
+  :focus-visible{outline:2px solid var(--cool); outline-offset:2px}
+  .wrap{max-width:560px; margin:0 auto; padding:0 16px}
 
-  header{position:sticky; top:0; z-index:20;
-    background:color-mix(in srgb, var(--bg) 88%, transparent);
-    backdrop-filter:blur(10px); border-bottom:1px solid var(--hair)}
-  .brand{display:flex; align-items:center; gap:10px; max-width:540px; margin:0 auto; padding:12px 15px 9px}
-  .logo{width:22px; height:22px; flex:none}
-  .brand h1{font-size:15px; font-weight:700; margin:0; letter-spacing:-.01em}
-  .brand .right{margin-left:auto; display:flex; align-items:center; gap:10px}
-  .status{font-family:var(--mono); font-size:10.5px; letter-spacing:.02em}
-  .status.on{color:var(--cool)} .status.off{color:var(--warm)}
-  .themebtn{background:var(--chip); border:1px solid var(--border); color:var(--muted);
-    width:34px; height:34px; border-radius:9px; cursor:pointer; font-size:15px; line-height:1; display:grid; place-items:center}
+  /* ── 오른쪽 앱 머리줄 ── */
+  .combo-right > header{position:sticky; top:0; z-index:20;
+    background:color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter:saturate(1.4) blur(14px); -webkit-backdrop-filter:saturate(1.4) blur(14px)}
+  .brand{display:flex; align-items:center; gap:10px; max-width:560px; margin:0 auto; padding:16px 20px 12px}
+  .logo{width:24px; height:24px; flex:none}
+  .brand h1{font-size:19px; font-weight:700; margin:0; letter-spacing:-.025em}
+  .brand .right{margin-left:auto; display:flex; align-items:center; gap:8px}
+  .status{font-size:12px; font-weight:600; padding:5px 10px; border-radius:999px; letter-spacing:-.005em}
+  .status.on{color:var(--cool-strong); background:var(--chipon)}
+  .status.off{color:var(--warm-text); background:var(--warm-weak)}
+  .themebtn{background:var(--surface); border:none; color:var(--muted); width:36px; height:36px; border-radius:50%;
+    cursor:pointer; font-size:15px; line-height:1; display:grid; place-items:center; transition:color .15s}
   .themebtn:hover{color:var(--text)}
-  nav{display:flex; gap:4px; max-width:540px; margin:0 auto; padding:0 12px 0}
-  nav button{flex:1; background:none; border:none; color:var(--muted); font-family:var(--sans);
-    font-size:13.5px; font-weight:600; padding:10px 4px 12px; cursor:pointer;
-    border-bottom:2px solid transparent; letter-spacing:.01em}
-  nav button.active{color:var(--text); border-bottom-color:var(--cool)}
 
-  main{padding-top:16px}
-  .view{display:none; animation:fade .18s ease} .view.active{display:block}
-  @keyframes fade{from{opacity:0; transform:translateY(3px)}to{opacity:1; transform:none}}
-  section{background:var(--surface); border:1px solid var(--border); border-radius:var(--r);
-    padding:15px; margin-bottom:12px; box-shadow:var(--shadow)}
-  .eyebrow{font-size:11px; font-weight:700; letter-spacing:.11em; text-transform:uppercase; color:var(--faint); margin:0 0 12px; display:flex; align-items:center; gap:8px}
-  .eyebrow .sub{font-weight:500; text-transform:none; letter-spacing:0; color:var(--faint)}
-  h2{font-size:16px; margin:0 0 4px; font-weight:700}
-  .muted{color:var(--muted)} .faint{color:var(--faint)} .mono{font-family:var(--mono)}
+  /* 탭: 회색 바탕 위에 흰 알약이 올라온 모양 */
+  nav{display:flex; gap:2px; width:calc(100% - 32px); max-width:528px; margin:0 auto 12px; padding:4px; background:var(--seg); border-radius:var(--r-ctl);
+    overflow-x:auto; scrollbar-width:none}
+  nav::-webkit-scrollbar{display:none}
+  nav button{flex:1 1 auto; white-space:nowrap; background:none; border:none; color:var(--muted);
+    font-size:14px; font-weight:600; padding:8px 10px; border-radius:10px; cursor:pointer; transition:color .15s, background-color .15s}
+  nav button:hover{color:var(--text2)}
+  nav button.active{background:var(--surface); color:var(--text); font-weight:700; box-shadow:var(--shadow)}
+  html[data-theme="dark"] nav button.active{background:var(--raise)}
 
-  .daybar{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:2px}
-  .daydate{font-family:var(--mono); font-size:12.5px; color:var(--muted)}
-  .rowlabel{font-size:11px; color:var(--faint); width:100%; margin:8px 0 -2px; font-weight:600; letter-spacing:.02em}
+  main{padding-top:4px}
+  .view{display:none} .view.active{display:block}
 
-  .chips{display:flex; flex-wrap:wrap; gap:7px}
-  .chip{background:var(--chip); border:1px solid var(--border); color:var(--muted);
-    border-radius:999px; padding:8px 14px; font-size:13px; cursor:pointer; font-family:var(--sans);
-    min-height:38px; display:inline-flex; align-items:center; gap:5px; user-select:none; transition:.12s}
-  .chip:hover{border-color:var(--faint); color:var(--text)}
-  .chip.on{background:var(--chipon); border-color:var(--cool); color:var(--text); font-weight:600}
-  .chip.warm.on{background:var(--warm-ink); border-color:var(--warm)}
-  .chip.red.on{background:color-mix(in srgb,var(--red) 22%, var(--surface)); border-color:var(--red)}
-  .chip.sm{padding:6px 11px; min-height:32px; font-size:12.5px}
+  /* ── 카드 ── */
+  section{background:var(--surface); border:none; border-radius:var(--r-card); padding:24px 20px; margin-bottom:12px}
+  .eyebrow{font-size:17px; font-weight:700; letter-spacing:-.025em; color:var(--text); margin:0 0 16px; display:flex; align-items:baseline; gap:6px}
+  .eyebrow .sub{font-size:14px; font-weight:500; letter-spacing:-.01em; color:var(--faint)}
+  h2{font-size:22px; margin:0 0 4px; font-weight:700; letter-spacing:-.03em}
+  .muted{color:var(--muted)} .faint{color:var(--faint)} .mono{font-family:var(--mono); font-variant-numeric:tabular-nums}
 
-  .field{margin-bottom:15px} .field:last-child{margin-bottom:0}
-  .label{font-size:12px; color:var(--muted); margin-bottom:8px; display:flex; gap:8px; align-items:center; font-weight:600}
-  .label .opt{color:var(--faint); font-weight:400}
+  .daybar{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+  .daydate{font-size:14px; font-weight:600; color:var(--muted)}
+  .rowlabel{font-size:13px; color:var(--muted); width:100%; margin:14px 0 8px; font-weight:600}
 
-  .timerCard{text-align:center; padding:22px 15px 18px}
-  .clock{font-family:var(--mono); font-size:62px; font-weight:600; line-height:1; letter-spacing:.005em; margin:2px 0 3px; font-variant-numeric:tabular-nums}
-  .clock small{font-size:22px; color:var(--muted)}
-  .csub{color:var(--muted); font-size:12.5px; margin-bottom:16px; font-family:var(--mono); min-height:16px}
-  .track{position:relative; height:10px; background:var(--surface2); border-radius:999px; overflow:hidden; margin:0 4px 18px; border:1px solid var(--border)}
-  .track .fill{position:absolute; inset:0 auto 0 0; width:0; background:linear-gradient(90deg,var(--cool),#43e3d0); transition:width .4s linear}
-  .track.hot .fill{background:linear-gradient(90deg,var(--cool),var(--warm))}
-  .track .dipmark{position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--warm); opacity:.9; display:none}
+  /* ── 칩(선택 버튼) ── */
+  .chips{display:flex; flex-wrap:wrap; gap:8px}
+  .chip{background:var(--surface2); border:none; color:var(--text2);
+    border-radius:var(--r-chip); padding:0 14px; font-size:14.5px; font-weight:600; cursor:pointer;
+    min-height:42px; display:inline-flex; align-items:center; gap:6px; user-select:none; transition:background-color .12s, color .12s}
+  .chip:hover{background:var(--raise)}
+  .chip .faint{font-weight:500; font-size:13px}
+  .chip.on{background:var(--chipon); color:var(--cool-strong); font-weight:700}
+  .chip.on .faint{color:var(--cool-strong); opacity:.7}
+  .chip.warm.on{background:var(--warm-weak); color:var(--warm-text)}
+  .chip.red.on{background:var(--red-weak); color:var(--red)}
+  .chip.sm{padding:0 13px; min-height:36px; font-size:14px; border-radius:10px}
 
-  .btns{display:flex; gap:9px}
-  button.act{flex:1; border:none; border-radius:11px; padding:15px; font-size:15px; font-weight:700;
-    cursor:pointer; font-family:var(--sans); min-height:52px; transition:.12s}
-  .b-go{background:var(--cool); color:var(--cool-ink)} .b-go:hover{filter:brightness(1.06)}
-  .b-pause{background:var(--surface2); color:var(--text); border:1px solid var(--border)!important}
-  .b-pause:hover{background:var(--raise)}
-  .b-dip{background:var(--warm-ink); color:var(--warm); border:1px solid var(--warm)!important; flex:0 0 auto; padding-left:20px; padding-right:20px}
-  .b-dip:hover{filter:brightness(1.1)}
+  .field{margin-bottom:22px} .field:last-child{margin-bottom:0}
+  .label{font-size:14px; color:var(--text2); margin-bottom:10px; display:flex; gap:6px; align-items:baseline; font-weight:600}
+  .label .opt{color:var(--faint); font-weight:500; font-size:13px}
+
+  /* ── 타이머: 이 화면의 주인공 ── */
+  .timerCard{text-align:center; padding:36px 20px 22px}
+  .clock{font-size:clamp(68px, 19vw, 92px); font-weight:700; line-height:1; letter-spacing:-.045em; margin:0;
+    font-variant-numeric:tabular-nums; color:var(--text)}
+  .clock small{font-size:.4em; font-weight:600; color:var(--faint); letter-spacing:-.02em; margin-left:2px}
+  .csub{color:var(--muted); font-size:14px; font-weight:500; margin:12px 0 26px; min-height:20px}
+  .track{position:relative; height:8px; background:var(--surface2); border-radius:999px; overflow:hidden; margin:0 0 24px; border:none}
+  .track .fill{position:absolute; inset:0 auto 0 0; width:0; background:var(--cool); border-radius:999px; transition:width .4s linear, background-color .3s}
+  .track.hot .fill{background:var(--warm)}
+  .track .dipmark{position:absolute; top:0; bottom:0; width:3px; margin-left:-1px; background:var(--text); opacity:.55; display:none}
+  #restFill{background:var(--good)!important}
+
+  /* ── 큰 버튼 ── */
+  .btns{display:flex; gap:8px}
+  button.act{flex:1; border:none; border-radius:16px; padding:0 16px; font-size:17px; font-weight:700; letter-spacing:-.02em;
+    cursor:pointer; min-height:56px; transition:background-color .12s, transform .08s, filter .12s}
+  button.act:active, button.mini:active, .chip:active{transform:scale(.97)}
+  .b-go{background:var(--cool); color:#fff} .b-go:hover{filter:brightness(.94)}
+  html[data-theme="dark"] .b-go:hover{filter:brightness(1.08)}
+  .b-pause{background:var(--surface2); color:var(--text2)} .b-pause:hover{background:var(--raise)}
+  .b-dip{background:var(--warm-weak); color:var(--warm-text); flex:0 0 auto!important; padding:0 18px}
+  .b-dip:hover{filter:brightness(.97)}
   .b-dip.done{opacity:.5; pointer-events:none}
-  .b-stop{background:var(--warm); color:var(--warm-ink)} .b-stop:hover{filter:brightness(1.05)}
-  .b-ghost{background:transparent; color:var(--muted); border:1px solid var(--border)!important}
-  .b-ghost:hover{color:var(--text)}
+  .b-stop{background:var(--red-weak); color:var(--red)} .b-stop:hover{filter:brightness(.97)}
+  .b-ghost{background:var(--surface2); color:var(--text2)} .b-ghost:hover{background:var(--raise)}
+  #restStart{background:var(--good)!important; color:#fff!important}
 
-  button.mini.b-go{background:var(--cool); color:var(--cool-ink); border:none; font-weight:700}
-  button.mini.b-go:hover{filter:brightness(1.06)}
-  button.mini{background:var(--surface2); border:1px solid var(--border); color:var(--text);
-    border-radius:9px; padding:9px 13px; font-size:13px; cursor:pointer; font-family:var(--sans)}
-  button.mini:hover{border-color:var(--faint)}
-  .step{display:inline-flex; align-items:center; border:1px solid var(--border); border-radius:9px; overflow:hidden; background:var(--surface2)}
-  .step button{background:none; border:none; color:var(--text); width:40px; height:40px; font-size:19px; cursor:pointer}
+  button.mini{background:var(--surface2); border:none; color:var(--text2);
+    border-radius:12px; padding:0 15px; min-height:42px; font-size:14px; font-weight:600; cursor:pointer; transition:background-color .12s, transform .08s}
+  button.mini:hover{background:var(--raise)}
+  button.mini.b-go{background:var(--cool); color:#fff; font-weight:700}
+  button.mini.b-go:hover{background:var(--cool); filter:brightness(.94)}
+  button.mini.b-ghost{background:var(--surface2)}
+
+  /* 숫자 조절(− 46분 +) */
+  .step{display:inline-flex; align-items:center; border:none; border-radius:var(--r-ctl); overflow:hidden; background:var(--surface2); height:50px}
+  .step button{background:none; border:none; color:var(--text2); width:50px; height:50px; font-size:22px; font-weight:500; cursor:pointer; transition:background-color .12s}
   .step button:hover{background:var(--raise)}
-  .step .val{font-family:var(--mono); min-width:74px; text-align:center; font-size:14px}
-  .step input.val{background:transparent; border:none; color:var(--text); width:56px; -moz-appearance:textfield; padding:0; outline:none}
+  .step .val{min-width:76px; text-align:center; font-size:17px; font-weight:700; font-variant-numeric:tabular-nums}
+  .step input.val{background:transparent; border:none; color:var(--text); width:56px; min-width:0; -moz-appearance:textfield; padding:0; outline:none}
   .step input.val::-webkit-outer-spin-button,.step input.val::-webkit-inner-spin-button{-webkit-appearance:none; margin:0}
-  .step .unit{font-family:var(--mono); font-size:13px; color:var(--muted); padding-right:8px}
+  .step input.val::placeholder{color:var(--faint)}
+  .step .unit{font-size:14px; font-weight:600; color:var(--muted); padding-right:6px}
 
   .setup{transition:opacity .2s}
-  .setup.dim{opacity:.35; pointer-events:none}
+  .setup.dim{opacity:.4; pointer-events:none}
 
-  .srow{display:flex; gap:11px; padding:11px 0; border-top:1px solid var(--hair); cursor:pointer}
-  .srow:first-child{border-top:none}
-  .srow:hover{background:color-mix(in srgb,var(--raise) 40%, transparent); margin:0 -8px; padding-left:8px; padding-right:8px; border-radius:8px; border-top-color:transparent}
-  .srow .dot{width:9px; height:9px; border-radius:50%; flex:none; margin-top:5px}
+  /* ── 세션 목록 ── */
+  .srow{display:flex; gap:12px; padding:14px 12px; margin:0 -12px; border-radius:16px; cursor:pointer; transition:background-color .12s}
+  .srow:hover{background:var(--surface2)}
+  .srow .dot{width:8px; height:8px; border-radius:50%; flex:none; margin-top:9px}
   .srow .body{flex:1; min-width:0}
-  .srow .line1{display:flex; gap:8px; align-items:baseline; flex-wrap:wrap}
-  .srow .subj{font-weight:600}
-  .srow .time{font-family:var(--mono); font-size:12px; color:var(--muted)}
-  .srow .line2{font-size:12px; color:var(--muted); margin-top:3px}
-  .tag{font-size:10.5px; padding:1.5px 7px; border-radius:5px; font-family:var(--mono); font-weight:500}
-  .tag.high{background:var(--chipon); color:var(--cool)}
-  .tag.low{background:var(--surface2); color:var(--muted); border:1px solid var(--border)}
-  .tag.leg{background:color-mix(in srgb,var(--violet) 18%, var(--surface)); color:var(--violet)}
+  .srow .line1{display:flex; gap:6px 8px; align-items:center; flex-wrap:wrap}
+  .srow .subj{font-size:16px; font-weight:700; letter-spacing:-.02em}
+  .srow .time{font-size:13.5px; font-weight:500; color:var(--muted); font-variant-numeric:tabular-nums}
+  .srow .line2{font-size:13.5px; color:var(--muted); margin-top:4px; line-height:1.5}
+  .tag{font-size:12px; padding:3px 7px; border-radius:6px; font-weight:600; line-height:1.2}
+  .tag.high{background:var(--chipon); color:var(--cool-strong)}
+  .tag.low{background:var(--surface2); color:var(--muted)}
+  .tag.leg{background:var(--violet-weak); color:var(--violet)}
 
   .totalbar{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap}
-  .bignum{font-family:var(--mono); font-size:32px; font-weight:600; line-height:1; font-variant-numeric:tabular-nums}
-  .bignum small{font-size:14px; color:var(--muted); font-weight:400}
+  .bignum{font-size:40px; font-weight:700; line-height:1.05; letter-spacing:-.04em; font-variant-numeric:tabular-nums}
+  .bignum small{font-size:16px; color:var(--muted); font-weight:600; letter-spacing:-.01em; margin-left:3px}
 
-  .statgrid{display:grid; grid-template-columns:1fr 1fr; gap:10px}
-  .stat{background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:13px}
-  .stat .k{font-size:11px; color:var(--muted); margin-bottom:6px}
-  .stat .v{font-family:var(--mono); font-size:23px; font-weight:600; font-variant-numeric:tabular-nums}
-  .stat .v small{font-size:12px; color:var(--muted)}
+  .statgrid{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+  .stat{background:var(--surface2); border:none; border-radius:16px; padding:16px}
+  .stat .k{font-size:13px; font-weight:600; color:var(--muted); margin-bottom:8px}
+  .stat .v{font-size:26px; font-weight:700; letter-spacing:-.03em; font-variant-numeric:tabular-nums}
+  .stat .v small{font-size:14px; font-weight:600; color:var(--muted); margin-left:2px}
 
-  .weekhead{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px}
-  .weekhead .wk{font-family:var(--mono); font-size:12px; color:var(--muted)}
-  .weekhead button{background:var(--surface2); border:1px solid var(--border); color:var(--text); width:34px; height:30px; border-radius:8px; cursor:pointer; font-size:13px}
-  .weekhead button:hover{border-color:var(--faint)} .weekhead button:disabled{opacity:.35; cursor:default}
-  .chart{display:flex; align-items:flex-end; gap:6px; height:150px; padding-top:6px}
-  .col{flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; cursor:default; position:relative}
+  /* ── 주간 막대그래프: 오늘만 진한 파랑 ── */
+  .weekhead{display:flex; align-items:center; justify-content:space-between; margin-bottom:16px}
+  .weekhead .wk{font-size:14px; font-weight:600; color:var(--text2)}
+  .weekhead button{background:var(--surface2); border:none; color:var(--text2); width:36px; height:36px; border-radius:10px; cursor:pointer; font-size:12px}
+  .weekhead button:hover{background:var(--raise)} .weekhead button:disabled{opacity:.35; cursor:default}
+  .chart{display:flex; align-items:flex-end; gap:6px; height:168px; padding-top:8px}
+  .col{flex:1; display:flex; flex-direction:column; align-items:center; gap:8px; height:100%; cursor:default; position:relative}
   .col .barwrap{flex:1; width:100%; display:flex; align-items:flex-end; justify-content:center}
-  .col .bar{width:74%; max-width:34px; background:linear-gradient(180deg,var(--cool),color-mix(in srgb,var(--cool) 55%, var(--surface))); border-radius:6px 6px 3px 3px; min-height:2px; transition:.15s; position:relative}
-  .col .bar.today{outline:2px solid var(--cool); outline-offset:2px}
-  .col .bar.rest{background:repeating-linear-gradient(45deg,var(--surface2),var(--surface2) 4px,var(--border) 4px,var(--border) 8px)}
-  .col .bar.crash{background:color-mix(in srgb,var(--red) 55%, var(--surface))}
-  .col:hover .bar{filter:brightness(1.12)}
-  .col .dl{font-family:var(--mono); font-size:10.5px; color:var(--faint)}
-  .col .dl b{color:var(--text); font-weight:600; display:block; font-size:10px}
+  .col .bar{width:62%; max-width:30px; background:var(--cool-soft); border-radius:8px 8px 5px 5px; min-height:3px; transition:height .2s, background-color .15s}
+  .col .bar.today{background:var(--cool); outline:none}
+  .col .bar.rest{background:repeating-linear-gradient(-45deg,var(--surface2),var(--surface2) 4px,var(--raise) 4px,var(--raise) 8px)}
+  .col .bar.crash{background:var(--red); opacity:.55}
+  .col:hover .bar:not(.rest){filter:brightness(.95)}
+  .col .dl{font-size:12px; color:var(--faint); text-align:center; line-height:1.35; font-variant-numeric:tabular-nums}
+  .col .dl b{color:var(--text2); font-weight:700; display:block; font-size:12.5px}
   .tip{position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%);
-    background:var(--raise); border:1px solid var(--border); color:var(--text); font-size:11px;
-    font-family:var(--mono); white-space:nowrap; padding:5px 9px; border-radius:7px; box-shadow:var(--shadow);
-    opacity:0; pointer-events:none; transition:opacity .12s; z-index:5}
+    background:var(--tip); color:#fff; font-size:12px; font-weight:600;
+    white-space:nowrap; padding:6px 10px; border-radius:8px; opacity:0; pointer-events:none; transition:opacity .12s; z-index:5}
   .col:hover .tip{opacity:1}
-  .weekfoot{display:flex; justify-content:space-between; margin-top:14px; padding-top:12px; border-top:1px solid var(--hair); font-size:12px}
-  .weekfoot .mono{color:var(--text)}
+  .weekfoot{display:flex; justify-content:space-between; align-items:baseline; margin-top:18px; padding-top:16px; border-top:1px solid var(--hair); font-size:14px}
+  .weekfoot .muted{font-weight:600}
+  .weekfoot .mono{color:var(--text); font-weight:700; font-size:15px}
 
-  .reasonbar{display:flex; height:24px; border-radius:7px; overflow:hidden; border:1px solid var(--border); margin-bottom:10px}
+  .reasonbar{display:flex; gap:3px; height:14px; border-radius:999px; overflow:hidden; border:none; margin-bottom:14px}
   .reasonbar > div{height:100%}
-  .legend{display:flex; flex-wrap:wrap; gap:12px; font-size:12px; color:var(--muted)}
-  .legend span{display:inline-flex; align-items:center; gap:6px}
-  .swatch{width:11px; height:11px; border-radius:3px}
+  .legend{display:flex; flex-wrap:wrap; gap:8px 16px; font-size:13.5px; font-weight:500; color:var(--text2)}
+  .legend span{display:inline-flex; align-items:center; gap:7px}
+  .swatch{width:10px; height:10px; border-radius:3px}
 
-  textarea{width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text);
-    border-radius:9px; padding:11px; font-family:var(--mono); font-size:12px; resize:vertical; line-height:1.5}
-  input[type=text].tin, input[type=time].tin{background:var(--bg); border:1px solid var(--border); color:var(--text);
-    border-radius:8px; padding:9px 11px; font-size:13px; font-family:var(--sans)}
+  /* ── 입력칸 ── */
+  textarea{width:100%; background:var(--surface2); border:none; color:var(--text);
+    border-radius:var(--r-ctl); padding:14px; font-family:var(--code); font-size:12.5px; resize:vertical; line-height:1.5}
+  input[type=text].tin, input[type=time].tin, input[type=email].tin, input[type=password].tin, input[type=number].tin{
+    background:var(--surface2); border:none; color:var(--text); border-radius:var(--r-ctl);
+    height:48px; padding:0 14px; font-size:15px; font-weight:500; min-width:0}
+  .tin::placeholder, textarea::placeholder{color:var(--faint)}
+  .tin:focus, textarea:focus{outline:none; box-shadow:inset 0 0 0 2px var(--cool)}
   input.grow{width:100%}
-  .note-collapse{color:var(--cool); font-size:12px; cursor:pointer; background:none; border:none; padding:2px 0; font-family:var(--sans)}
+  .note-collapse{color:var(--cool-strong); font-size:14px; font-weight:600; cursor:pointer; background:none; border:none; padding:2px 0}
   .row{display:flex; gap:8px; align-items:center; flex-wrap:wrap} .grow{flex:1}
-  .divider{height:1px; background:var(--hair); margin:14px 0}
-  .hint{font-size:12px; color:var(--faint); line-height:1.55}
-  .empty{text-align:center; color:var(--faint); padding:24px 0; font-size:13px}
+  .divider{height:1px; background:var(--hair); margin:22px 0}
+  .hint{font-size:13px; color:var(--faint); line-height:1.6}
+  .empty{text-align:center; color:var(--faint); padding:28px 0 20px; font-size:14px; font-weight:500}
 
-  .scrim{position:fixed; inset:0; background:rgba(6,9,13,.66); display:none; align-items:flex-end; justify-content:center; z-index:50; padding-top:40px}
+  /* ── 아래에서 올라오는 시트 ── */
+  .scrim{position:fixed; inset:0; background:var(--scrim); display:none; align-items:flex-end; justify-content:center; z-index:50; padding-top:40px}
   .scrim.open{display:flex}
-  .sheet{background:var(--surface); border:1px solid var(--border); border-radius:18px 18px 0 0;
-    width:100%; max-width:540px; max-height:100%; overflow-y:auto; padding:20px 16px calc(22px + env(safe-area-inset-bottom)); box-shadow:0 -8px 40px rgba(0,0,0,.4)}
-  @media(min-width:600px){ .scrim{align-items:center; padding:20px} .sheet{border-radius:18px} }
-  .sheet .elapsed{font-family:var(--mono); color:var(--muted); font-size:13px; margin:2px 0 18px}
-  .toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
-    background:var(--raise); border:1px solid var(--cool); color:var(--text); padding:11px 17px;
-    border-radius:999px; font-size:13px; z-index:80; opacity:0; transition:opacity .2s; pointer-events:none; box-shadow:var(--shadow); max-width:90vw; text-align:center}
-  .toast.show{opacity:1}
-  .subgrid{display:flex; gap:8px}
+  .sheet{background:var(--surface); border:none; border-radius:28px 28px 0 0;
+    width:100%; max-width:560px; max-height:100%; overflow-y:auto; padding:12px 20px calc(24px + env(safe-area-inset-bottom));
+    animation:sheet-up .24s cubic-bezier(.2,.8,.2,1)}
+  .sheet::before{content:""; display:block; width:40px; height:5px; border-radius:3px; background:var(--raise); margin:0 auto 18px}
+  @keyframes sheet-up{from{transform:translateY(32px); opacity:.4}to{transform:none; opacity:1}}
+  @media(min-width:600px){ .scrim{align-items:center; padding:24px} .sheet{border-radius:28px; padding-top:28px} .sheet::before{display:none} }
+  .sheet .elapsed{color:var(--muted); font-size:14px; font-weight:500; margin:4px 0 24px}
+  .sheet .btns{margin-top:8px}
+  .toast{position:fixed; bottom:24px; left:50%; transform:translate(-50%, 8px);
+    background:var(--tip); color:#fff; border:none; padding:13px 20px;
+    border-radius:16px; font-size:14px; font-weight:600; z-index:80; opacity:0; transition:opacity .2s, transform .2s; pointer-events:none; max-width:90vw; text-align:center}
+  .toast.show{opacity:1; transform:translate(-50%, 0)}
+  .subgrid{display:flex; gap:8px; align-items:center}
   .subgrid .tin{flex:1}
-</style>
-<style>
 
-  .wt-root {
-    --bg: #1c1b19;
-    --surface: #242220;
-    --surface-2: #2b2925;
-    --ink-red: #c8442d;
-    --ink-red-dim: #8f3120;
-    --paper: #ede6d9;
-    --muted: #948e7d;
-    --line: #3a3733;
-    --focus: #d7b16a;
+  /* ================= 왼쪽: 루틴-투두 체크 로그 ================= */
+  .wt-root{
+    --paper:var(--text); --line:var(--hair); --surface-2:var(--surface2);
+    --ink-red:var(--cool); --ink-red-dim:var(--cool-soft); --focus:var(--warm-text);
+    font-family:var(--sans); color:var(--text); background:transparent;
+    display:flex; flex-direction:column; align-items:center; gap:12px; padding:16px 16px; box-sizing:border-box}
+  .wt-root *, .wt-root *::before, .wt-root *::after{box-sizing:border-box}
+  .wt-card{width:100%; max-width:600px; background:var(--surface); border:none; border-radius:var(--r-card); overflow:hidden}
+  .wt-header{display:flex; align-items:flex-end; justify-content:space-between; gap:12px; padding:24px 24px 16px;
+    border:none; position:static; background:none}
+  .wt-eyebrow{display:none}
+  .wt-title{margin:0; font-size:20px; font-weight:700; letter-spacing:-.03em}
+  .wt-usage{margin:6px 0 0; font-size:13px; color:var(--muted); line-height:1.5}
+  .wt-usage-hi{color:var(--text2); font-weight:700}
+  .wt-counter{flex-shrink:0; text-align:right}
+  .wt-counter-main{display:flex; align-items:baseline; justify-content:flex-end; gap:3px; line-height:1}
+  .wt-counter-num{font-size:30px; font-weight:700; letter-spacing:-.03em; color:var(--text)}
+  .wt-counter-den{font-size:14px; color:var(--muted); font-weight:600}
+  .wt-counter-sub{margin:0; font-size:13px; font-weight:600; color:var(--muted); white-space:nowrap}
+  .wt-counter-sub [data-sessions]{color:var(--text); font-weight:700}
+  .wt-counter-rest{color:var(--warm-text)}
 
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
-      "Malgun Gothic", system-ui, sans-serif;
-    color: var(--paper);
-    background: transparent;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
-    padding: 24px 12px;
-    box-sizing: border-box;
-  }
-  .wt-root *, .wt-root *::before, .wt-root *::after { box-sizing: border-box; }
+  .wt-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch; padding:0 8px}
+  .wt-table{border-collapse:separate; border-spacing:0; width:100%; min-width:480px}
+  .wt-table th, .wt-table td{text-align:center; padding:0; border-bottom:1px solid var(--border)}
+  .wt-table tbody tr:not(.wt-add-row):hover td{background:color-mix(in srgb, var(--surface2) 70%, var(--surface))}
+  .wt-table thead th{border-bottom:none}
+  .wt-day-th{padding:2px 2px 8px; min-width:38px}
+  .wt-corner-th{min-width:132px; background:var(--surface); position:sticky; left:0; z-index:2}
+  .wt-total-th{font-size:12px; font-weight:600; color:var(--faint); padding:0 8px 10px; min-width:48px; vertical-align:bottom}
 
-  .wt-card {
-    width: 100%;
-    max-width: 600px;
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    overflow: hidden;
-  }
+  .wt-weeklabel{font-size:12px; font-weight:700; padding:4px 0 6px; text-align:center; letter-spacing:-.01em}
+  .wt-weeklabel.prev{color:var(--faint)}
+  .wt-weeklabel.cur{color:var(--cool-strong)}
+  .wt-wk-sep, .wt-weeklabel.cur.wt-wk-sep{border-left:2px solid var(--ring)!important}
 
-  .wt-header {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 22px 22px 18px;
-    border-bottom: 1px solid var(--line);
-  }
-  .wt-eyebrow {
-    margin: 0 0 4px;
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 0.16em;
-    color: var(--ink-red);
-    font-family: "Arial Narrow", "Helvetica Neue", sans-serif;
-  }
-  .wt-title {
-    margin: 0;
-    font-size: 21px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-  }
-  .wt-counter {
-    flex-shrink: 0;
-    text-align: right;
-  }
-  .wt-counter-main {
-    display: flex;
-    align-items: baseline;
-    justify-content: flex-end;
-    gap: 3px;
-    line-height: 1;
-  }
-  .wt-counter-num {
-    font-size: 32px;
-    font-weight: 800;
-    font-family: "Arial Narrow", "Helvetica Neue", sans-serif;
-    color: var(--paper);
-    font-variant-numeric: tabular-nums;
-  }
-  .wt-counter-den {
-    font-size: 14px;
-    color: var(--muted);
-    font-weight: 600;
-  }
-  .wt-counter-sub {
-    margin: 5px 0 0;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-  }
-  .wt-counter-rest { color: var(--focus); }
+  .wt-day-btn{font-size:13px; font-weight:600; color:var(--text2); background:transparent; border:none; border-radius:10px;
+    padding:6px 2px 5px; width:100%; cursor:pointer; line-height:1.1; transition:background-color .12s}
+  .wt-day-btn:hover{background:var(--surface2); color:var(--text)}
+  .wt-day-btn:focus-visible{outline:2px solid var(--cool); outline-offset:1px}
+  .wt-day-btn.is-rest{color:var(--warm-text); background:var(--warm-weak)}
+  .wt-day-btn.is-today{color:var(--cool-strong); font-weight:700; box-shadow:none}
+  .wt-day-name{display:block; line-height:1.15}
+  .wt-day-tag{display:block; height:13px; line-height:13px; margin-top:3px; font-size:10px; font-weight:700}
+  .wt-day-tag.is-rest{color:var(--warm-text)}
+  .wt-day-tag.is-today{color:var(--cool-strong)}
+  .wt-col-today{background:color-mix(in srgb, var(--cool) 9%, transparent)}
 
-  .wt-scroll {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
+  .wt-ex-name{position:sticky; left:0; background:var(--surface); text-align:left; font-size:14px; font-weight:600; color:var(--text);
+    padding:10px 10px 10px 16px; line-height:1.25; z-index:1; white-space:nowrap; border-right:1px solid var(--border)}
+  .wt-cell{padding:7px 3px}
+  .wt-stamp-btn{width:32px; height:32px; border-radius:50%; border:none; background:transparent; box-shadow:inset 0 0 0 2px var(--ring); cursor:pointer;
+    position:relative; display:flex; align-items:center; justify-content:center; padding:0; margin:0 auto;
+    font-size:13px; font-weight:700; color:var(--cool-strong); font-variant-numeric:tabular-nums;
+    -webkit-tap-highlight-color:transparent; transition:background-color .15s, transform .08s}
+  .wt-stamp-btn:hover:not(:disabled){filter:brightness(.96)}
+  .wt-stamp-btn:active:not(:disabled){transform:scale(.9)}
+  .wt-stamp-btn:focus-visible{outline:2px solid var(--cool); outline-offset:2px}
+  .wt-stamp-val{display:block; line-height:1}
+  /* 빈칸 = 테두리만 / 채운 칸 = 꽉 찬 색, 숫자가 클수록 진하게 */
+  .wt-stamp-btn:not([data-n="0"]){box-shadow:none; background:var(--lv4); color:var(--lv4-text)}
+  .wt-stamp-btn[data-n="1"]{background:var(--lv1); color:var(--lv1-text)}
+  .wt-stamp-btn[data-n="2"]{background:var(--lv2); color:#fff}
+  .wt-stamp-btn[data-n="3"]{background:var(--lv3); color:#fff}
+  /* 쉬는 날 = 동그라미 없이 짧은 선 */
+  .wt-stamp-btn.is-rest{cursor:default; background:transparent; box-shadow:none}
+  .wt-stamp-btn.is-rest .wt-stamp-val{display:none}
+  .wt-stamp-btn.is-rest::before{content:""; width:12px; height:2px; border-radius:1px; background:var(--faint); opacity:.7}
+  .wt-stamp-val.wt-pop{animation:wt-pop-in .18s ease-out}
+  @keyframes wt-pop-in{0%{transform:scale(.3); opacity:0}100%{transform:scale(1); opacity:1}}
 
-  .wt-table {
-    border-collapse: collapse;
-    width: 100%;
-    min-width: 480px;
-  }
+  .wt-row-total{font-size:14px; font-weight:700; color:var(--text2); font-variant-numeric:tabular-nums}
+  .wt-row-total.is-full{color:var(--cool-strong)}
+  tfoot .wt-corner-th{text-align:left; font-size:13px; font-weight:600; color:var(--muted); padding:12px 10px 12px 16px}
+  .wt-col-total{font-size:13px; font-weight:700; color:var(--text2); font-variant-numeric:tabular-nums; padding:12px 2px}
+  .wt-col-total.is-full{color:var(--cool-strong)}
+  .wt-col-total.is-rest{color:var(--warm-text)}
+  .wt-table tfoot td, .wt-table tfoot th{border-bottom:none; border-top:1px solid var(--border)}
 
-  .wt-table th, .wt-table td {
-    text-align: center;
-    padding: 0;
-    border-bottom: 1px solid var(--line);
-  }
+  .wt-footer{display:flex; align-items:center; justify-content:flex-start; padding:14px 24px 22px; gap:8px; flex-wrap:wrap}
+  .wt-hint{margin:0; font-size:12.5px; color:var(--faint); text-align:right; flex:1 1 200px}
+  .wt-reset, .wt-week-btn{border:none; font-size:13.5px; font-weight:600; padding:0 14px; min-height:38px; border-radius:12px; cursor:pointer;
+    flex-shrink:0; margin:0; transition:background-color .12s, transform .08s}
+  .wt-week-btn{background:var(--chipon); color:var(--cool-strong)}
+  .wt-week-btn:hover{filter:brightness(.97)}
+  .wt-reset{background:var(--surface2); color:var(--text2)}
+  .wt-reset:hover{background:var(--raise)}
+  .wt-reset:focus-visible, .wt-week-btn:focus-visible{outline:2px solid var(--cool); outline-offset:2px}
+  .wt-reset.wt-confirming{background:var(--red-weak); color:var(--red)}
+  .wt-maxbox{font-size:13.5px; font-weight:600; color:var(--muted); display:inline-flex; align-items:center; gap:6px; margin-left:4px}
+  .wt-maxin{width:48px; height:38px; background:var(--surface2); border:none; color:var(--text); border-radius:10px; padding:0 4px;
+    font-size:14px; font-weight:700; text-align:center; -moz-appearance:textfield}
+  .wt-maxin:focus{outline:none; box-shadow:inset 0 0 0 2px var(--cool)}
+  .wt-maxin::-webkit-outer-spin-button, .wt-maxin::-webkit-inner-spin-button{-webkit-appearance:none; margin:0}
 
-  .wt-day-th {
-    padding: 8px 4px 6px;
-    min-width: 38px;
-  }
+  .wt-ex-label{cursor:pointer; border-bottom:1px dashed transparent}
+  .wt-ex-label:hover{border-bottom-color:var(--faint)}
+  .wt-row-del{margin-left:6px; background:none; border:none; color:var(--faint); cursor:pointer; font-size:11px; opacity:0; transition:opacity .12s; padding:2px 4px}
+  tr:hover .wt-row-del{opacity:.8}
+  .wt-row-del:hover{color:var(--red); opacity:1}
+  .wt-name-input{width:124px; background:var(--surface2); border:none; box-shadow:inset 0 0 0 2px var(--cool); color:var(--text); border-radius:8px; padding:6px 8px; font-size:14px; font-weight:600}
+  .wt-name-input:focus{outline:none}
+  .wt-add-row td{padding:10px 16px; border:none}
+  .wt-table tbody .wt-add-row td{border-bottom:none}
+  .wt-add-btn{background:none; border:1.5px dashed var(--border); color:var(--muted); border-radius:12px; padding:8px 14px; font-size:13.5px; font-weight:600; cursor:pointer}
+  .wt-add-btn:hover{color:var(--cool-strong); border-color:var(--cool)}
+  .wt-page-note{margin:0; font-size:12px; color:var(--faint); text-align:center; max-width:600px; padding:0 8px; line-height:1.5}
 
-  .wt-corner-th {
-    min-width: 128px;
-    background: var(--surface);
-    position: sticky;
-    left: 0;
-    z-index: 2;
+  @media (max-width:420px){
+    .wt-header{padding:22px 20px 14px; flex-wrap:wrap}
+    .wt-footer{padding:14px 20px 20px}
+    .wt-corner-th, .wt-ex-name{min-width:112px; padding-left:12px}
+    .wt-hint{text-align:left; flex-basis:100%}
+    section{padding:22px 18px}
   }
 
-  .wt-total-th {
-    font-size: 10px;
-    font-weight: 700;
-    color: var(--muted);
-    letter-spacing: 0.04em;
-    padding: 12px 10px 8px;
-    min-width: 48px;
-  }
-
-  .wt-day-btn {
-    font-family: inherit;
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--muted);
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 6px;
-    padding: 5px 4px 4px;
-    width: 100%;
-    cursor: pointer;
-    line-height: 1.1;
-  }
-  .wt-day-btn:hover { color: var(--paper); border-color: var(--line); }
-  .wt-day-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-  .wt-day-btn.is-rest {
-    color: var(--focus);
-    border-color: var(--line);
-    background: var(--surface-2);
-  }
-  .wt-day-name { display: block; line-height: 1.1; }
-  /* 태그 슬롯: 내용이 있든 없든 항상 이 높이를 차지해서 칸 크기가 안 변한다 */
-  .wt-day-tag {
-    display: block;
-    height: 12px;
-    line-height: 12px;
-    margin-top: 3px;
-    font-size: 9px;
-    font-weight: 800;
-    letter-spacing: 0.05em;
-  }
-  .wt-day-tag.is-rest { color: var(--focus); }
-  .wt-day-tag.is-today { color: var(--ink-red); }
-
-  /* 오늘 요일: 빨강 밑줄 + 옅은 빨강 밴드 (휴일=금색과 색 분리) */
-  .wt-day-btn.is-today {
-    color: var(--paper);
-    box-shadow: inset 0 -2px 0 var(--ink-red);
-  }
-  .wt-col-today { background: rgba(200, 68, 45, 0.08); }
-
-  .wt-ex-name {
-    position: sticky;
-    left: 0;
-    background: var(--surface);
-    text-align: left;
-    font-size: 12.5px;
-    font-weight: 700;
-    color: var(--paper);
-    padding: 10px 12px 10px 16px;
-    line-height: 1.25;
-    border-right: 1px solid var(--line);
-    z-index: 1;
-  }
-
-  .wt-cell {
-    padding: 8px 4px;
-  }
-
-  .wt-stamp-btn {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    border: 2px solid var(--line);
-    background: transparent;
-    cursor: pointer;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    margin: 0 auto;
-    font-family: "Arial Narrow", "Helvetica Neue", sans-serif;
-    font-size: 13px;
-    font-weight: 800;
-    color: var(--paper);
-    font-variant-numeric: tabular-nums;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .wt-stamp-btn:focus-visible {
-    outline: 2px solid var(--focus);
-    outline-offset: 2px;
-  }
-  .wt-stamp-val { display: block; line-height: 1; }
-
-  .wt-stamp-btn[data-n="1"] { border-color: var(--ink-red-dim); background: rgba(200, 68, 45, 0.24); }
-  .wt-stamp-btn[data-n="2"] { border-color: var(--ink-red-dim); background: rgba(200, 68, 45, 0.46); }
-  .wt-stamp-btn[data-n="3"] { border-color: var(--ink-red); background: rgba(200, 68, 45, 0.68); }
-  .wt-stamp-btn[data-n="4"] { border-color: var(--focus); background: var(--ink-red); }
-
-  .wt-stamp-btn.is-rest {
-    cursor: default;
-    opacity: 0.3;
-    border-style: dashed;
-  }
-
-  .wt-stamp-val.wt-pop { animation: wt-pop-in 0.18s ease-out; }
-  @media (prefers-reduced-motion: reduce) {
-    .wt-stamp-val.wt-pop { animation: none; }
-  }
-  @keyframes wt-pop-in {
-    0% { transform: scale(0.2); opacity: 0; }
-    100% { transform: scale(1); opacity: 1; }
-  }
-
-  .wt-row-total {
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-  }
-  .wt-row-total.is-full { color: var(--ink-red); }
-
-  tfoot .wt-corner-th {
-    text-align: left;
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--muted);
-    padding: 10px 12px 10px 16px;
-  }
-  .wt-col-total {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-    padding: 10px 4px;
-  }
-  .wt-col-total.is-full { color: var(--ink-red); }
-  .wt-col-total.is-rest { color: var(--focus); }
-  tfoot tr { border-top: 1px solid var(--line); }
-  tfoot td, tfoot th { border-bottom: none; }
-
-  .wt-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 22px 20px;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-  .wt-hint {
-    margin: 0;
-    font-size: 10.5px;
-    color: var(--muted);
-    text-align: right;
-    flex: 1 1 180px;
-  }
-  .wt-reset {
-    background: transparent;
-    border: 1px solid var(--line);
-    color: var(--muted);
-    font-size: 12px;
-    font-weight: 600;
-    padding: 7px 12px;
-    border-radius: 6px;
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-  .wt-reset:hover { border-color: var(--ink-red-dim); color: var(--paper); }
-  .wt-reset:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-  .wt-reset.wt-confirming { border-color: var(--ink-red); color: var(--ink-red); }
-
-  /* ── 14일 확장 UI ── */
-  /* 지난주/이번주 구분: 이번주 첫 칸 왼쪽에 굵은 경계선 (유지) */
-  .wt-wk-sep { border-left: 2px solid var(--focus) !important; }
-  /* 제목 아래 사용법 주석 */
-  .wt-usage { margin: 4px 0 0; font-size: 11.5px; color: var(--muted); line-height: 1.4; }
-  .wt-usage-hi { color: var(--focus); font-weight: 700; }
-  /* 최대값 입력칸 */
-  .wt-maxbox { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 5px; }
-  .wt-maxin { width: 46px; background: var(--surface); border: 1px solid var(--line); color: var(--paper);
-    border-radius: 6px; padding: 5px 6px; font-size: 12.5px; font-family: var(--mono); text-align: center;
-    -moz-appearance: textfield; }
-  .wt-maxin::-webkit-outer-spin-button, .wt-maxin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-  /* 요일 위 구역 라벨 행 */
-  .wt-weeklabel { font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: .1em; padding: 4px 0 2px; text-align: center; }
-  .wt-weeklabel.prev { color: var(--muted); }
-  .wt-weeklabel.cur  { color: var(--focus); }
-  .wt-weeklabel.cur.wt-wk-sep { border-left: 2px solid var(--focus) !important; }
-  /* 항목 이름 셀: 이름 + 삭제버튼 */
-  .wt-ex-name { white-space: nowrap; }
-  .wt-ex-label { cursor: pointer; border-bottom: 1px dashed transparent; }
-  .wt-ex-label:hover { border-bottom-color: var(--line); }
-  .wt-row-del { margin-left: 8px; background: none; border: none; color: var(--muted);
-    cursor: pointer; font-size: 11px; opacity: 0; transition: opacity .12s; padding: 2px 4px; }
-  tr:hover .wt-row-del { opacity: 0.7; }
-  .wt-row-del:hover { color: var(--ink-red); opacity: 1; }
-  .wt-name-input { width: 120px; background: var(--bg, #12161b); border: 1px solid var(--focus);
-    color: var(--paper); border-radius: 6px; padding: 5px 7px; font-size: 12.5px; font-family: inherit; }
-  /* 항목 추가 행 */
-  .wt-add-row td { padding: 8px 12px; border: none; }
-  .wt-add-btn { background: none; border: 1px dashed var(--line); color: var(--muted);
-    border-radius: 8px; padding: 7px 12px; font-size: 12px; cursor: pointer; font-family: inherit; }
-  .wt-add-btn:hover { color: var(--paper); border-color: var(--focus); }
-  /* 다음 주로 버튼 */
-  .wt-week-btn { background: none; border: 1px solid var(--line); color: var(--focus);
-    border-radius: 8px; padding: 7px 12px; font-size: 12px; cursor: pointer; font-family: inherit; margin-right: 8px; }
-  .wt-week-btn:hover { border-color: var(--focus); color: var(--paper); background: rgba(215,177,106,0.08); }
-
-  .wt-page-note {
-    margin: 0;
-    font-size: 11px;
-    color: var(--muted);
-    text-align: center;
-    max-width: 600px;
-    padding: 0 8px;
-    line-height: 1.5;
-  }
-
-  @media (max-width: 420px) {
-    .wt-header { padding: 18px 16px 14px; }
-    .wt-footer { padding: 14px 16px 18px; }
-    .wt-corner-th, .wt-ex-name { min-width: 108px; padding-left: 12px; }
-    .wt-hint { text-align: left; flex-basis: 100%; }
-  }
-
-</style>
-
-<style>
-  /* combined two-pane layout */
-  .combo{max-width:1760px;margin:0 auto;display:flex;flex-direction:column;gap:0;align-items:flex-start}
+  /* ── 두 앱 배치: 넓은 화면은 좌우, 좁은 화면은 위아래 ── */
+  .combo{max-width:1760px; margin:0 auto; display:flex; flex-direction:column; gap:0; align-items:flex-start}
   .combo-left{width:100%}
-  .combo-right{width:100%;min-width:0}
-  .combo-left .wt-root{padding:16px 15px 6px}
+  .combo-right{width:100%; min-width:0}
   .combo-left .wt-card{max-width:none}
   @media(min-width:1000px){
-    .combo{flex-direction:row;gap:8px;padding:0 8px}
-    .combo-left{flex:0 0 62%;position:sticky;top:0;align-self:flex-start;max-height:100vh;overflow-y:auto}
-    .combo-right{flex:1 1 38%}
-    .combo-right header{position:sticky;top:0}
+    .combo{flex-direction:row; gap:4px; padding:0 12px}
+    .combo-left{flex:0 0 62%; position:sticky; top:0; align-self:flex-start; max-height:100vh; overflow-y:auto; scrollbar-width:thin}
+    .combo-right{flex:1 1 38%; padding-top:4px}
+    .combo-right > header{position:sticky; top:0}
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *, *::before, *::after{animation:none!important; transition:none!important}
   }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -915,11 +736,114 @@ function defaultState(){return{
 let S=defaultState();
 let AUTOSAVE=false;
 try{localStorage.setItem("__t","1");localStorage.removeItem("__t");AUTOSAVE=true;}catch(e){AUTOSAVE=false;}
-function save(){if(!AUTOSAVE)return;try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
-function loadSaved(){if(!AUTOSAVE)return;try{const raw=localStorage.getItem(KEY);if(raw){const p=JSON.parse(raw);
-  S=Object.assign(defaultState(),p);
-  S.settings=Object.assign(defaultState().settings,p.settings||{});
-  S.sel=Object.assign(defaultState().sel,p.sel||{});}}catch(e){}}
+/* ================= 동시 기록 합치기 =================
+   같은 기록을 두 곳(다른 탭, 다른 기기)에서 따로 바꿨을 때, 한쪽이 다른 쪽을 통째로 덮어쓰지 않고 합친다.
+   base   = 두 곳이 마지막으로 똑같았던 상태
+   mine   = 이 탭/기기의 지금 상태
+   theirs = 다른 탭/기기의 지금 상태
+   - 한쪽만 바꾼 것 → 바꾼 쪽을 따름 (추가·수정·삭제 모두)
+   - 양쪽이 다 바꾼 것 → 칸 단위로 내려가서 합침. 세션·카페인·투두 항목처럼 id가 있는 목록은 항목 단위로 합침
+   - 같은 칸을 양쪽이 서로 다른 값으로 바꾼 경우에만 mine이 이김 */
+function stableStr(v){
+  if(v===undefined) return "\u0000u";
+  if(v===null||typeof v!=="object") return JSON.stringify(v);
+  if(Array.isArray(v)) return "["+v.map(stableStr).join(",")+"]";
+  return "{"+Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>JSON.stringify(k)+":"+stableStr(v[k])).join(",")+"}";
+}
+function sameVal(a,b){return stableStr(a)===stableStr(b);}
+function isPlainObj(v){return v!==null&&typeof v==="object"&&!Array.isArray(v);}
+function itemId(x){if(!isPlainObj(x))return null;if(x.id!=null)return "i:"+x.id;if(x.key!=null)return "k:"+x.key;return "c:"+stableStr(x);}
+function merge3(b,m,t){
+  if(sameVal(m,t)) return m;
+  if(sameVal(b,m)) return t;
+  if(sameVal(b,t)) return m;
+  if(isPlainObj(m)&&isPlainObj(t)){
+    const bb=isPlainObj(b)?b:{}, out={};
+    new Set([...Object.keys(bb),...Object.keys(m),...Object.keys(t)]).forEach(k=>{
+      const v=merge3(bb[k],m[k],t[k]); if(v!==undefined) out[k]=v; });
+    return out;
+  }
+  if(Array.isArray(m)&&Array.isArray(t)){
+    const bb=Array.isArray(b)?b:[], all=bb.concat(m,t);
+    if(all.length&&all.every(x=>isPlainObj(x))) return mergeById(bb,m,t);
+    if(all.every(x=>x===null||typeof x!=="object")){
+      const strings=all.length&&all.every(x=>typeof x==="string");
+      // 칸 위치가 의미 있는 목록(투두 14칸 같은 것)은 같은 위치끼리 합침
+      if(!strings&&m.length===t.length&&(!Array.isArray(b)||bb.length===m.length))
+        return m.map((_,i)=>merge3(bb[i],m[i],t[i]));
+      return mergeAsSet(bb,m,t);
+    }
+  }
+  return m;
+}
+function mergeById(b,m,t){
+  const B=new Map(b.map(x=>[itemId(x),x])), M=new Map(m.map(x=>[itemId(x),x])), T=new Map(t.map(x=>[itemId(x),x]));
+  const order=[], seen=new Set();
+  m.concat(t).forEach(x=>{const k=itemId(x);if(!seen.has(k)){seen.add(k);order.push(k);}});
+  const out=[];
+  order.forEach(k=>{const v=merge3(B.get(k),M.get(k),T.get(k));if(v!==undefined)out.push(v);});
+  return out;
+}
+function mergeAsSet(b,m,t){
+  const inB=new Set(b.map(stableStr)), inM=new Set(m.map(stableStr)), inT=new Set(t.map(stableStr));
+  const out=[], seen=new Set();
+  m.concat(t).forEach(x=>{const k=stableStr(x);if(seen.has(k))return;seen.add(k);
+    if(inB.has(k)&&(!inM.has(k)||!inT.has(k)))return;   // 한쪽에서 지운 것
+    out.push(x);});
+  return out;
+}
+// 진행 중 세션(running)은 칸별로 섞으면 안 되니 통째로: 내가 안 건드렸으면 상대 것, 건드렸으면 내 것
+function mergeTrackerState(b,m,t){
+  const out=JSON.parse(JSON.stringify(merge3(b,m,t)));
+  if(isPlainObj(out)&&isPlainObj(m)&&isPlainObj(t)){
+    const bR=isPlainObj(b)?b.running:undefined;
+    out.running=sameVal(bR,m.running)?(t.running??null):(m.running??null);
+  }
+  return out;
+}
+function normalizeTracker(p){
+  const s=Object.assign(defaultState(),p);
+  s.settings=Object.assign(defaultState().settings,p.settings||{});
+  s.sel=Object.assign(defaultState().sel,p.sel||{});
+  if(!Array.isArray(s.sessions))s.sessions=[];
+  if(!isPlainObj(s.days))s.days={};
+  return s;
+}
+
+// 이 탭이 마지막으로 저장소에서 읽었거나 저장소에 쓴 내용.
+// 저장소가 이것과 다르면 그 사이 다른 탭이 저장한 것 → 덮어쓰지 말고 합친다.
+// diskBase = 그때의 내용(합치기의 base). 저장된 게 없던 탭은 처음 띄운 기본값이 base.
+let lastDiskRaw=null, diskBase=undefined;
+function markDisk(raw){lastDiskRaw=raw;diskBase=JSON.parse(raw);}
+function save(){if(!AUTOSAVE)return;try{
+  const disk=localStorage.getItem(KEY);
+  if(disk!=null&&disk!==lastDiskRaw){
+    S=normalizeTracker(mergeTrackerState(diskBase,S,JSON.parse(disk)));
+    setTimeout(afterExternalChange,0);
+  }
+  const out=JSON.stringify(S);if(out!==disk)localStorage.setItem(KEY,out);markDisk(out);
+}catch(e){}}
+function loadSaved(){if(!AUTOSAVE)return;try{const raw=localStorage.getItem(KEY);
+  if(raw){S=normalizeTracker(JSON.parse(raw));markDisk(raw);}
+  else diskBase=JSON.parse(JSON.stringify(S));}catch(e){}}
+// 다른 탭이 저장하면 브라우저가 알려줌 → 바로 합쳐서 화면에 반영
+function adoptFromDisk(){if(!AUTOSAVE)return;try{
+  const disk=localStorage.getItem(KEY);
+  if(disk==null||disk===lastDiskRaw)return;
+  const theirs=JSON.parse(disk);
+  S=normalizeTracker(mergeTrackerState(diskBase,S,theirs));
+  if(sameVal(S,normalizeTracker(theirs))){markDisk(disk);}
+  else{const out=JSON.stringify(S);localStorage.setItem(KEY,out);markDisk(out);}
+  afterExternalChange();
+}catch(e){}}
+function afterExternalChange(){
+  try{
+    applyTheme();renderAll();
+    if(S.running){if(!S.running.paused)runTick();}
+    else if($("#endScrim").classList.contains("open"))closeEnd();
+  }catch(e){}
+}
+window.addEventListener("storage",e=>{if(e.storageArea===localStorage&&(e.key===KEY||e.key===null))adoptFromDisk();});
 
 const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
 const pad=n=>String(n).padStart(2,"0");
@@ -1541,43 +1465,104 @@ function wire(){
 /* ===================== 클라우드 동기화 (Supabase) ===================== */
 const SB_URL="https://aggdnyclybncvkyemvli.supabase.co";
 const SB_KEY="sb_publishable_laf6T7QP24eDIcbyjgpO_w_yxuHoxwl";
-const SYNC_BASE_KEY="sync-base";
-let sb=null, sbUser=null, syncTimer=null, syncReconciling=false, lastWatchJSON=null;
+const SYNC_BASE_KEY="sync-base";   // 이 브라우저가 클라우드와 마지막으로 맞췄을 때의 내용 (합치기의 base)
+let sb=null, sbUser=null, syncTimer=null, pollTimer=null, lastWatchJSON=null, syncBusy=false, syncQueued=false;
 
-function buildBundle(){
-  return { format:"study-hub-backup", version:1, savedAt:new Date().toISOString(),
-    tracker:S,
-    todo:{
-      exercise:(()=>{try{return JSON.parse(localStorage.getItem("exercise-rotation-grid"));}catch(e){return null;}})(),
-      study:(()=>{try{return JSON.parse(localStorage.getItem("study-rotation-grid"));}catch(e){return null;}})(),
-      maxCount:(()=>{try{const v=parseInt(localStorage.getItem("todo-max-count"),10);return isNaN(v)?null:v;}catch(e){return null;}})()
-    }};
+function readTodoFromDisk(){
+  const j=k=>{try{return JSON.parse(localStorage.getItem(k));}catch(e){return null;}};
+  let maxCount=null;try{const v=parseInt(localStorage.getItem("todo-max-count"),10);maxCount=isNaN(v)?null:v;}catch(e){}
+  return {exercise:j("exercise-rotation-grid"), study:j("study-rotation-grid"), maxCount};
 }
-// 데이터 비교/전송용: 매번 바뀌는 값(savedAt, 진행중 타이머)은 제외
-function sanitizedBundle(){
-  const b=buildBundle(); b.savedAt=null;
-  try{ if(b.tracker){ b.tracker=Object.assign({},b.tracker); b.tracker.running=null; } }catch(e){}
-  return b;
-}
-function bundleDataJSON(){ try{ return JSON.stringify(sanitizedBundle()); }catch(e){ return ""; } }
-function cloudDataJSON(cloudBundle){ try{ const b=Object.assign({},cloudBundle); b.savedAt=null; if(b.tracker){b.tracker=Object.assign({},b.tracker); b.tracker.running=null;} return JSON.stringify(b); }catch(e){ return null; } }
-function isEmptyData(){ try{ return (!S.sessions||S.sessions.length===0) && (!S.days||Object.keys(S.days).length===0); }catch(e){ return false; } }
-function applyBundleToStorage(p){
+// 비교·합치기용 '내용'만 뽑기: 포장(format·savedAt)과 진행 중 타이머는 뺀다.
+// 예전 형식(세션추적기만 있는 백업, 예전 sync-base)도 읽을 수 있게.
+function contentOf(bundle){
   try{
-    const tracker=(p && p.format==="study-hub-backup") ? p.tracker : p;
-    if(!tracker||!tracker.sessions||!tracker.settings) return false;
-    const merged=Object.assign(defaultState(),tracker);
-    merged.settings=Object.assign(defaultState().settings,tracker.settings||{});
-    merged.sel=Object.assign(defaultState().sel,tracker.sel||{});
-    merged.running=S.running||null;   // 클라우드 데이터를 받아와도 이 기기에서 돌던 세션은 유지
-    localStorage.setItem(KEY, JSON.stringify(merged));
-    if(p && p.format==="study-hub-backup" && p.todo){
-      if(p.todo.exercise) localStorage.setItem("exercise-rotation-grid", JSON.stringify(p.todo.exercise));
-      if(p.todo.study) localStorage.setItem("study-rotation-grid", JSON.stringify(p.todo.study));
-      if(p.todo.maxCount!=null) localStorage.setItem("todo-max-count", String(p.todo.maxCount));
+    if(!bundle)return null;
+    const tr=bundle.tracker?bundle.tracker:bundle;
+    if(!tr||!Array.isArray(tr.sessions)||!tr.settings)return null;
+    const t=JSON.parse(JSON.stringify(tr));delete t.running;
+    const td=(bundle.tracker&&bundle.todo)?bundle.todo:{};
+    return {tracker:t, todo:{exercise:td.exercise??null, study:td.study??null, maxCount:td.maxCount??null}};
+  }catch(e){return null;}
+}
+function localContent(){return contentOf({tracker:S, todo:readTodoFromDisk()});}
+// 아무것도 안 건드린 처음 상태. 처음 연결하는 기기에서 "누가 뭘 바꿨나"를 가리는 기준(base)으로 씀
+function defaultContent(){
+  const t=normalizeTracker(defaultState());delete t.running;
+  const td=(window.todoSync&&window.todoSync.defaults)?window.todoSync.defaults():{};
+  return {tracker:t, todo:{exercise:td.exercise??null, study:td.study??null, maxCount:null}};
+}
+// 투두를 한 번도 저장 안 한 쪽은 비어(null) 있으니 처음 상태로 채워서 비교
+function withTodoDefaults(c){
+  if(!c)return c;const d=defaultContent();
+  if(c.todo.exercise==null)c.todo.exercise=d.todo.exercise;
+  if(c.todo.study==null)c.todo.study=d.todo.study;
+  return c;
+}
+// 합친 결과를 이 브라우저에 반영 (진행 중 타이머는 그대로 둠)
+function applyContentLocally(c){
+  const run=S.running;
+  S=normalizeTracker(JSON.parse(JSON.stringify(c.tracker)));S.running=run;
+  save();
+  try{
+    const td=c.todo||{};
+    if(td.exercise)localStorage.setItem("exercise-rotation-grid",JSON.stringify(td.exercise));
+    if(td.study)localStorage.setItem("study-rotation-grid",JSON.stringify(td.study));
+    if(td.maxCount!=null)localStorage.setItem("todo-max-count",String(td.maxCount));
+  }catch(e){}
+  if(window.todoSync)window.todoSync.reload();
+  afterExternalChange();
+}
+// 투두 표는 칸 위치가 요일이라, 서로 다른 주 기준인 것끼리 합치면 엉뚱한 칸끼리 섞인다 → 먼저 오늘 기준 주로 맞춤
+function rollTodo(c){
+  if(!c||!window.todoSync||!window.todoSync.roll)return c;
+  c.todo.exercise=window.todoSync.roll(c.todo.exercise);
+  c.todo.study=window.todoSync.roll(c.todo.study);
+  return c;
+}
+function flushLocal(){save();if(window.todoSync)window.todoSync.flush();}
+function newStamp(){const iso=new Date().toISOString();return iso.slice(0,-1)+String(Math.floor(Math.random()*1000)).padStart(3,"0")+"Z";}
+function markSynced(merged){
+  try{localStorage.setItem(SYNC_BASE_KEY,JSON.stringify(merged));}catch(e){}
+  lastWatchJSON=stableStr(localContent());
+  setSyncStatus("동기화됨 · "+hhmm());
+}
+// 받기 → 합치기 → (바뀐 게 있으면) 올리기.
+// 올릴 때 "내가 받았던 그 버전일 때만 덮어써라"는 조건을 건다. 그 사이 다른 기기가 먼저 올렸으면 다시 받아서 합친다.
+async function syncNow(){
+  if(!sb||!sbUser)return;
+  if(syncBusy){syncQueued=true;return;}
+  syncBusy=true;
+  try{
+    for(let attempt=1;attempt<=4;attempt++){
+      flushLocal();
+      const {data,error}=await sb.from("user_state").select("data,updated_at").eq("user_id",sbUser.id).maybeSingle();
+      if(error){setSyncStatus("동기화 오류: "+error.message);return;}
+      if(!sbUser)return;
+      flushLocal();   // 기다리는 동안 바뀐 것까지 포함
+      const local=rollTodo(withTodoDefaults(localContent()));
+      const cloud=data?rollTodo(withTodoDefaults(contentOf(data.data))):null;
+      let base=null;try{const raw=localStorage.getItem(SYNC_BASE_KEY);base=raw?rollTodo(withTodoDefaults(contentOf(JSON.parse(raw)))):null;}catch(e){}
+      let merged;
+      if(!cloud)merged=local;
+      else if(base)merged=merge3(base,local,cloud);
+      else merged=merge3(defaultContent(),cloud,local);   // 이 기기 첫 연결: 양쪽에서 바꾼 것 다 살리고, 같은 칸이 겹치면 클라우드 것
+      merged=JSON.parse(JSON.stringify(merged));
+      if(!sameVal(merged,local))applyContentLocally(merged);
+      if(cloud&&sameVal(merged,cloud)){markSynced(merged);return;}
+      const row={data:Object.assign({format:"study-hub-backup",version:1,savedAt:new Date().toISOString()},merged),updated_at:newStamp()};
+      let res;
+      if(!data||attempt===4){
+        res=await sb.from("user_state").upsert(Object.assign({user_id:sbUser.id},row));
+      }else{
+        res=await sb.from("user_state").update(row).eq("user_id",sbUser.id).eq("updated_at",data.updated_at).select("user_id");
+        if(!res.error&&(!res.data||!res.data.length))continue;   // 그 사이 다른 기기가 먼저 올림 → 다시
+      }
+      if(res.error){setSyncStatus("저장 실패: "+res.error.message);return;}
+      markSynced(merged);return;
     }
-    return true;
-  }catch(e){ return false; }
+  }catch(e){setSyncStatus("동기화 오류");}
+  finally{syncBusy=false;if(syncQueued){syncQueued=false;setTimeout(syncNow,200);}}
 }
 function setSyncStatus(t){ const el=$("#syncStatus"); if(el) el.textContent=t; }
 function hhmm(){ const d=new Date(); return pad(d.getHours())+":"+pad(d.getMinutes()); }
@@ -1629,63 +1614,23 @@ async function doLogout(){ try{ await sb.auth.signOut(); }catch(e){} toast("로�
 async function onLoggedIn(){
   showLoggedIn();
   setSyncStatus("동기화 확인 중…");
-  await reconcile();
+  await syncNow();
   startWatch();
 }
-async function reconcile(){
-  if(syncReconciling) return; syncReconciling=true;
-  try{
-    const { data, error }=await sb.from("user_state").select("data").eq("user_id",sbUser.id).maybeSingle();
-    if(error){ setSyncStatus("동기화 오류: "+error.message); syncReconciling=false; return; }
-    const localJSON=bundleDataJSON();
-    const base=localStorage.getItem(SYNC_BASE_KEY);
-    if(!data){ await pushNow(); syncReconciling=false; return; }
-    const cloudJSON=cloudDataJSON(data.data);
-    if(cloudJSON===localJSON){ try{localStorage.setItem(SYNC_BASE_KEY, localJSON);}catch(e){} setSyncStatus("동기화됨 · "+hhmm()); syncReconciling=false; return; }
-    if(base==null){
-      if(isEmptyData()){ pullApply(data.data, cloudJSON); return; }
-      const useCloud=confirm("클라우드에 저장된 기록이 있어요.\n\n확인 = 클라우드 것을 받아 이 기기를 덮어씁니다.\n취소 = 이 기기 것을 클라우드에 올립니다.");
-      if(useCloud){ pullApply(data.data, cloudJSON); return; }
-      await pushNow(); syncReconciling=false; return;
-    }
-    if(localJSON===base){ pullApply(data.data, cloudJSON); return; }
-    await pushNow(); syncReconciling=false;
-  }catch(e){ setSyncStatus("동기화 오류"); syncReconciling=false; }
-}
-function pullApply(cloudBundle, cloudJSON){
-  setSyncStatus("클라우드에서 불러오는 중…");
-  const ok=applyBundleToStorage(cloudBundle);
-  if(!ok){ setSyncStatus("불러온 데이터 형식 오류"); syncReconciling=false; return; }
-  try{ if(cloudJSON!=null) localStorage.setItem(SYNC_BASE_KEY, cloudJSON); }catch(e){}
-  toast("클라우드에서 불러옴 — 새로고침");
-  setTimeout(()=>location.reload(), 600);
-}
-async function pushNow(){
-  if(!sb||!sbUser) return;
-  try{
-    const bundle=buildBundle();
-    try{ bundle.tracker=Object.assign({},bundle.tracker); bundle.tracker.running=null; }catch(e){}
-    const localJSON=bundleDataJSON();
-    const { error }=await sb.from("user_state").upsert({ user_id:sbUser.id, data:bundle, updated_at:new Date().toISOString() });
-    if(error){ setSyncStatus("저장 실패: "+error.message); return; }
-    try{ localStorage.setItem(SYNC_BASE_KEY, localJSON); }catch(e){}
-    lastWatchJSON=localJSON;
-    setSyncStatus("동기화됨 · "+hhmm());
-  }catch(e){ setSyncStatus("저장 실패"); }
-}
+// 이 브라우저에서 뭔가 바뀌면 5초 안에 올리고, 화면이 보이는 동안 30초마다 다른 기기 변경을 받아온다.
 function startWatch(){
   stopWatch();
-  lastWatchJSON=bundleDataJSON();
+  lastWatchJSON=stableStr(localContent());
   syncTimer=setInterval(()=>{
-    if(!sbUser) return;
-    const j=bundleDataJSON();
-    if(j!==lastWatchJSON){ lastWatchJSON=j; pushNow(); }
-  }, 6000);
-  document.addEventListener("visibilitychange", onHidePush);
-  window.addEventListener("beforeunload", onHidePush);
+    if(!sbUser)return;
+    const j=stableStr(localContent());
+    if(j!==lastWatchJSON){lastWatchJSON=j;syncNow();}
+  },5000);
+  pollTimer=setInterval(()=>{if(sbUser&&!document.hidden)syncNow();},30000);
 }
-function stopWatch(){ if(syncTimer){clearInterval(syncTimer);syncTimer=null;} }
-function onHidePush(){ if(sbUser){ const j=bundleDataJSON(); if(j!==lastWatchJSON){ lastWatchJSON=j; pushNow(); } } }
+function stopWatch(){if(syncTimer){clearInterval(syncTimer);syncTimer=null;}if(pollTimer){clearInterval(pollTimer);pollTimer=null;}}
+document.addEventListener("visibilitychange",()=>{if(sbUser)syncNow();});
+window.addEventListener("pagehide",()=>{if(sbUser)syncNow();});
 /* ===================== /클라우드 동기화 ===================== */
 
 loadSaved();applyTheme();
@@ -1702,6 +1647,7 @@ wire();renderAll();restoreRunning();initSync();
   let MAX_SESSIONS = 4;           // 공통 최대값 (설정 가능)
   try { const v = parseInt(localStorage.getItem(MAX_KEY), 10); if (!isNaN(v) && v >= 1) MAX_SESSIONS = Math.min(20, v); } catch (e) {}
   const _maxListeners = [];       // 값 바뀌면 두 표를 다시 그리기 위한 콜백들
+  const todoApis = [];            // 표마다 저장/다시읽기 함수 (클라우드 동기화용)
   function setMaxCount(v) {
     v = Math.max(1, Math.min(20, Math.round(v || 0)));
     if (!v || isNaN(v)) return;
@@ -1724,13 +1670,57 @@ wire();renderAll();restoreRunning();initSync();
     }catch(e){}
     return 0;
   }
-  function todoTodayDow(){
+  // 하루 시작 기준을 적용한 '오늘' (정오로 맞춰서 날짜 계산만 함)
+  function logicalNow(){
     const now = new Date();
     const d = new Date(now);
     if(now.getHours() < todoDayStartHour()) d.setDate(d.getDate() - 1);
-    return (d.getDay() + 6) % 7;   // 월=0 ... 일=6
+    d.setHours(12, 0, 0, 0);
+    return d;
   }
-  const TODAY_COL = WEEK_LEN + todoTodayDow();
+  function todoTodayDow(){ return (logicalNow().getDay() + 6) % 7; }   // 월=0 ... 일=6
+  function ymdOf(d){ return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  function dateOf(ymd){ const [y, m, dd] = ymd.split("-").map(Number); return new Date(y, m - 1, dd, 12); }
+  function mondayOfNow(){ const d = logicalNow(); d.setDate(d.getDate() - todoTodayDow()); return ymdOf(d); }
+  let TODAY_COL = WEEK_LEN + todoTodayDow();
+
+  // ── 주 자동 넘김 ──
+  // 저장할 때 "이번주 칸이 몇 월 며칠 월요일부터의 주인지(weekStart)"를 같이 적어 둔다.
+  // 열 때, 그리고 켜 둔 채로 날짜가 바뀔 때 오늘이 속한 주와 비교해서 지난 만큼 칸을 옮긴다.
+  //   1주 지남: 이번주 → 지난주 자리로, 이번주는 비움 (예전 '한 주가 끝나면 누르기'와 같은 동작)
+  //   2주 이상 지남: 둘 다 비움 (그 사이 기록이 없으니까)
+  // weekStart가 없는 예전 저장본: 이번주 칸 중 '오늘보다 뒤 요일'에 기록이 있으면 지난주 것으로 보고 1주 넘긴다.
+  function rollSaved(p){
+    if(!p || !Array.isArray(p.items) || !p.grid) return p;
+    const out = JSON.parse(JSON.stringify(p));
+    const cur = mondayOfNow();
+    let ws = typeof out.weekStart === "string" ? out.weekStart : null;
+    if(!ws){
+      const today = todoTodayDow();
+      const future = out.items.some((ex) => {
+        const a = out.grid[ex.key]; if(!Array.isArray(a)) return false;
+        for(let d = today + 1; d < WEEK_LEN; d++) if(Number(a[WEEK_LEN + d]) > 0) return true;
+        return false;
+      });
+      const prev = dateOf(cur); prev.setDate(prev.getDate() - 7);
+      ws = future ? ymdOf(prev) : cur;
+    }
+    const weeks = Math.round((dateOf(cur) - dateOf(ws)) / (7 * 864e5));
+    if(weeks < 0) return p;          // 기기 시계가 뒤로 간 경우: 건드리지 않음
+    out.weekStart = cur;
+    if(weeks === 0) return out;
+    Object.keys(out.grid).forEach((k) => {
+      const a = out.grid[k]; if(!Array.isArray(a)) return;
+      for(let d = 0; d < WEEK_LEN; d++){ a[d] = weeks === 1 ? (a[d + WEEK_LEN] || 0) : 0; a[d + WEEK_LEN] = 0; }
+    });
+    if(Array.isArray(out.rest)) for(let d = 0; d < WEEK_LEN; d++){ out.rest[d] = weeks === 1 ? !!out.rest[d + WEEK_LEN] : false; out.rest[d + WEEK_LEN] = false; }
+    return out;
+  }
+  function weekRange(offsetWeeks){
+    const a = dateOf(mondayOfNow()); a.setDate(a.getDate() + offsetWeeks * 7);
+    const b = new Date(a); b.setDate(b.getDate() + 6);
+    return `${a.getMonth() + 1}/${a.getDate()}~${b.getMonth() + 1}/${b.getDate()}`;
+  }
 
   // 표 정의: items는 이제 기본값일 뿐, 실제 목록은 state.items에 저장되어 편집 가능.
   const TRACKERS = [
@@ -1789,18 +1779,50 @@ wire();renderAll();restoreRunning();initSync();
     }
     function defaultState() {
       const items = config.defaultItems.map((x) => ({ key: x.key, label: x.label }));
-      return { items, grid: blankGridFor(items), rest: new Array(NUM_DAYS).fill(false) };
+      return { items, grid: blankGridFor(items), rest: new Array(NUM_DAYS).fill(false), weekStart: mondayOfNow() };
     }
 
     let state = defaultState();
     let saveTimer = null;
+    let shiftedAtLoad = false;
+    // 이 탭이 마지막으로 저장소에서 읽었거나 쓴 내용. 저장소가 이것과 다르면 다른 탭이 저장한 것 → 합치기
+    // diskBase = 그때의 내용(합치기의 base). 저장된 게 없던 탭은 처음 띄운 기본값이 base.
+    let lastDiskRaw = null, diskBase;
+    function markDisk(raw) { lastDiskRaw = raw; diskBase = JSON.parse(raw); }
+    function readDisk() { try { return localStorage.getItem(storageKey); } catch (e) { return null; } }
+    function mergeFromDisk(disk) {
+      state = fromSaved(merge3(rollSaved(diskBase), rollSaved(JSON.parse(JSON.stringify(state))), rollSaved(JSON.parse(disk))));
+    }
+    function writeNow() {
+      clearTimeout(saveTimer); saveTimer = null;
+      try {
+        const disk = readDisk();
+        if (disk != null && disk !== lastDiskRaw) { mergeFromDisk(disk); setTimeout(render, 0); }
+        const out = JSON.stringify(state);
+        if (out !== disk) localStorage.setItem(storageKey, out);
+        markDisk(out);
+      } catch (e) { console.error("저장 실패:", e); }
+    }
     function scheduleSave() {
       clearTimeout(saveTimer);
-      saveTimer = setTimeout(() => {
-        try { localStorage.setItem(storageKey, JSON.stringify(state)); }
-        catch (e) { console.error("저장 실패:", e); }
-      }, 200);
+      saveTimer = setTimeout(writeNow, 200);
     }
+    // 다른 탭이 저장했거나, 클라우드에서 합친 결과가 저장소에 들어왔을 때
+    function reloadFromDisk() {
+      try {
+        const disk = readDisk();
+        if (disk == null || disk === lastDiskRaw) return;
+        if (document.activeElement && document.activeElement.classList.contains("wt-name-input") && card.contains(document.activeElement)) {
+          setTimeout(reloadFromDisk, 1500); return;   // 이름 입력 중이면 끝난 뒤에
+        }
+        mergeFromDisk(disk); markDisk(disk);
+        render();
+      } catch (e) {}
+    }
+    window.addEventListener("storage", (e) => {
+      if (e.storageArea === localStorage && (e.key === storageKey || e.key === null)) reloadFromDisk();
+    });
+    todoApis.push({ storageKey, defaults: defaultState, flush() { if (saveTimer) writeNow(); }, reload: reloadFromDisk });
 
     // ── 집계 ──
     function activeDays() { return state.rest.filter((r) => !r).length; }
@@ -1816,8 +1838,8 @@ wire();renderAll();restoreRunning();initSync();
       if (labelRow) {
         labelRow.innerHTML =
           `<th class="wt-corner-th"></th>` +
-          `<th class="wt-weeklabel prev" colspan="${WEEK_LEN}">지난주</th>` +
-          `<th class="wt-weeklabel cur wt-wk-sep" colspan="${WEEK_LEN}">이번주</th>` +
+          `<th class="wt-weeklabel prev" colspan="${WEEK_LEN}">지난주 ${weekRange(-1)}</th>` +
+          `<th class="wt-weeklabel cur wt-wk-sep" colspan="${WEEK_LEN}">이번주 ${weekRange(0)}</th>` +
           `<th></th>`;
       }
       let html = `<th class="wt-corner-th"></th>`;
@@ -1996,7 +2018,7 @@ wire();renderAll();restoreRunning();initSync();
 
     function syncMaxUI() {
       if (maxIn && document.activeElement !== maxIn) maxIn.value = MAX_SESSIONS;
-      if (hintEl) hintEl.textContent = `칸을 누르면 1씩 (${MAX_SESSIONS} 다음은 0) · 날짜를 누르면 쉬는날`;
+      if (hintEl) hintEl.textContent = `칸을 누르면 1씩 (${MAX_SESSIONS} 다음은 0) · 날짜를 누르면 쉬는날 · 월요일이 되면 자동으로 다음 주로 넘어가요`;
     }
     function render() { renderHead(); refreshHead(); renderBody(); renderFoot(); refreshTotals(); syncMaxUI(); }
 
@@ -2010,24 +2032,13 @@ wire();renderAll();restoreRunning();initSync();
     // 다른 카드에서 최대값이 바뀌면 이 카드도 다시 그림(칸 순환 상한/힌트 반영)
     _maxListeners.push(() => { render(); });
 
-    // ── 다음 주로 넘기기: 이번주(뒤7) → 지난주(앞7)로 이동, 이번주 비움 ──
-    function advanceWeek() {
-      if (!confirm("이번 주를 지난주 자리로 옮기고 이번 주를 비울까요?\n(지난주에 있던 기록은 사라집니다)")) return;
-      state.items.forEach((ex) => {
-        const arr = state.grid[ex.key];
-        for (let d = 0; d < WEEK_LEN; d++) { arr[d] = arr[d + WEEK_LEN]; arr[d + WEEK_LEN] = 0; }
-      });
-      for (let d = 0; d < WEEK_LEN; d++) { state.rest[d] = state.rest[d + WEEK_LEN]; state.rest[d + WEEK_LEN] = false; }
-      render(); scheduleSave();
+    // ── 주 자동 넘김: 지금 상태가 오늘 기준 주와 다르면 옮김. 칸이 실제로 옮겨졌으면 true ──
+    function checkNewWeek() {
+      const rolled = fromSaved(rollSaved(state));
+      const shifted = !sameVal(rolled.grid, state.grid) || !sameVal(rolled.rest, state.rest);
+      if (shifted || rolled.weekStart !== state.weekStart) { state = rolled; scheduleSave(); }
+      return shifted;
     }
-    // 넘김 버튼을 카드 헤더 액션 영역에 주입(없으면 초기화 버튼 옆)
-    (function injectAdvanceBtn() {
-      const b = document.createElement("button");
-      b.type = "button"; b.className = "wt-week-btn"; b.textContent = "한 주가 끝나면 누르기";
-      b.title = "이번 주를 지난주로 넘기고 이번 주 비우기";
-      b.addEventListener("click", advanceWeek);
-      if (resetBtn && resetBtn.parentNode) resetBtn.parentNode.insertBefore(b, resetBtn);
-    })();
 
     let resetConfirming = false;
     resetBtn.addEventListener("click", () => {
@@ -2042,40 +2053,82 @@ wire();renderAll();restoreRunning();initSync();
       resetConfirming = false; resetBtn.textContent = "초기화"; resetBtn.classList.remove("wt-confirming");
     });
 
+    // 저장된 모양 → 화면용 state (예전 형식도 변환)
+    function fromSaved(p) {
+      const st = defaultState();
+      // 신버전: items 포함
+      if (p && Array.isArray(p.items) && p.items.length) {
+        st.items = p.items.map((x) => ({ key: x.key, label: x.label }));
+        st.grid = blankGridFor(st.items);
+        st.items.forEach((ex) => {
+          const arr = p.grid && p.grid[ex.key];
+          if (Array.isArray(arr)) for (let d = 0; d < NUM_DAYS; d++) st.grid[ex.key][d] = toCount(arr[d]);
+        });
+        st.rest = new Array(NUM_DAYS).fill(false);
+        if (Array.isArray(p.rest)) for (let d = 0; d < Math.min(NUM_DAYS, p.rest.length); d++) st.rest[d] = !!p.rest[d];
+      }
+      // 구버전: items 없음, grid는 기본 키 기준 7칸 → 이번주(뒤7)로 이관
+      else if (p && p.grid) {
+        st.items = config.defaultItems.map((x) => ({ key: x.key, label: x.label }));
+        st.grid = blankGridFor(st.items);
+        st.items.forEach((ex) => {
+          const arr = p.grid[ex.key];
+          if (Array.isArray(arr)) for (let d = 0; d < Math.min(WEEK_LEN, arr.length); d++) st.grid[ex.key][WEEK_LEN + d] = toCount(arr[d]);
+        });
+        st.rest = new Array(NUM_DAYS).fill(false);
+        if (Array.isArray(p.rest)) for (let d = 0; d < Math.min(WEEK_LEN, p.rest.length); d++) st.rest[WEEK_LEN + d] = !!p.rest[d];
+      }
+      st.weekStart = (p && typeof p.weekStart === "string") ? p.weekStart : (p ? null : st.weekStart);
+      return st;
+    }
+
     (function load() {
       try {
         const raw = localStorage.getItem(storageKey);
-        if (raw) {
-          const p = JSON.parse(raw);
-          // 신버전: items 포함
-          if (p && Array.isArray(p.items) && p.items.length) {
-            state.items = p.items.map((x) => ({ key: x.key, label: x.label }));
-            state.grid = blankGridFor(state.items);
-            state.items.forEach((ex) => {
-              const arr = p.grid && p.grid[ex.key];
-              if (Array.isArray(arr)) for (let d = 0; d < NUM_DAYS; d++) state.grid[ex.key][d] = toCount(arr[d]);
-            });
-            state.rest = new Array(NUM_DAYS).fill(false);
-            if (Array.isArray(p.rest)) for (let d = 0; d < Math.min(NUM_DAYS, p.rest.length); d++) state.rest[d] = !!p.rest[d];
-          }
-          // 구버전: items 없음, grid는 기본 키 기준 7칸 → 이번주(뒤7)로 이관
-          else if (p && p.grid) {
-            state.items = config.defaultItems.map((x) => ({ key: x.key, label: x.label }));
-            state.grid = blankGridFor(state.items);
-            state.items.forEach((ex) => {
-              const arr = p.grid[ex.key];
-              if (Array.isArray(arr)) for (let d = 0; d < Math.min(WEEK_LEN, arr.length); d++) state.grid[ex.key][WEEK_LEN + d] = toCount(arr[d]);
-            });
-            state.rest = new Array(NUM_DAYS).fill(false);
-            if (Array.isArray(p.rest)) for (let d = 0; d < Math.min(WEEK_LEN, p.rest.length); d++) state.rest[WEEK_LEN + d] = !!p.rest[d];
-          }
-        }
+        if (raw) { state = fromSaved(JSON.parse(raw)); markDisk(raw); shiftedAtLoad = checkNewWeek(); }
       } catch (e) { /* 첫 사용 */ }
+      if (lastDiskRaw == null) diskBase = JSON.parse(JSON.stringify(state));
       render();
     })();
+    todoApis[todoApis.length - 1].checkNewWeek = checkNewWeek;
+    todoApis[todoApis.length - 1].render = render;
+    todoApis[todoApis.length - 1].shiftedAtLoad = shiftedAtLoad;
   }
 
+  // 다른 탭에서 '최대' 값을 바꾸면 이 탭도 따라감
+  function reloadMaxFromDisk() {
+    try {
+      const v = parseInt(localStorage.getItem(MAX_KEY), 10);
+      if (!isNaN(v) && v >= 1 && Math.min(20, v) !== MAX_SESSIONS) { MAX_SESSIONS = Math.min(20, v); _maxListeners.forEach((fn) => fn()); }
+    } catch (e) {}
+  }
+  window.addEventListener("storage", (e) => { if (e.storageArea === localStorage && (e.key === MAX_KEY || e.key === null)) reloadMaxFromDisk(); });
+
   TRACKERS.forEach(initTracker);
+
+  const WEEK_MSG = "새 주가 시작돼서 이번주 기록을 지난주 칸으로 옮겼어요";
+  if (todoApis.some((a) => a.shiftedAtLoad)) setTimeout(() => { if (typeof toast === "function") toast(WEEK_MSG); }, 800);
+  // 켜 둔 채로 날짜가 바뀌면: '오늘' 칸 이동, 월요일이 되면 주 넘김
+  function checkNewDay() {
+    const col = WEEK_LEN + todoTodayDow();
+    const shifted = todoApis.map((a) => a.checkNewWeek()).some(Boolean);
+    if (col !== TODAY_COL || shifted) { TODAY_COL = col; todoApis.forEach((a) => a.render()); }
+    if (shifted && typeof toast === "function") toast(WEEK_MSG);
+  }
+  setInterval(checkNewDay, 60000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) checkNewDay(); });
+
+  // 클라우드 동기화가 쓰는 연결 고리: 저장 대기 중인 것 바로 쓰기 / 저장소에 들어온 합친 결과 다시 읽기
+  window.todoSync = {
+    flush() { todoApis.forEach((a) => a.flush()); },
+    reload() { todoApis.forEach((a) => a.reload()); reloadMaxFromDisk(); },
+    roll: rollSaved,
+    defaults() {
+      const out = {};
+      todoApis.forEach((a) => { out[a.storageKey === "exercise-rotation-grid" ? "exercise" : "study"] = a.defaults(); });
+      return out;
+    },
+  };
 })();
 
 </script>
