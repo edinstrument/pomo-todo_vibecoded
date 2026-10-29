@@ -197,6 +197,10 @@
   .col .bar.crash{background:var(--red); opacity:.55}
   .col:hover .bar:not(.rest){filter:brightness(.95)}
   .col .dl{font-size:12px; color:var(--faint); text-align:center; line-height:1.35; font-variant-numeric:tabular-nums}
+  .chart .col{cursor:pointer}
+  .col.sel .dl{color:var(--cool)} .col.sel .dl b{color:var(--cool)}
+  .col.sel .barwrap{box-shadow:inset 0 -2px 0 var(--cool)}
+  .srow .pzline{margin-top:2px; font-size:12.5px; color:var(--faint)}
   .col .dl b{color:var(--text2); font-weight:700; display:block; font-size:12.5px}
   .tip{position:absolute; bottom:calc(100% + 6px); left:50%; transform:translateX(-50%);
     background:var(--tip); color:#fff; font-size:12px; font-weight:600;
@@ -531,8 +535,10 @@
       <div class="weekhead"><button id="wkPrev">◀</button><span class="wk" id="wkLabel">이번 주</span><button id="wkNext">▶</button></div>
       <div class="chart" id="chart"></div>
       <div class="weekfoot"><span class="muted">주 합계</span><span class="mono" id="wkTotal">0:00</span></div>
-      <div class="hint" style="margin-top:10px">막대에 커서를 올리면 그 날 상세가 떠요. 세션 자체 수정은 세션 탭에서.</div>
+      <div class="hint" style="margin-top:10px">막대를 누르면 그날 세션이 아래에 나와요. 세션을 누르면 수정할 수 있어요.</div>
     </section>
+
+    <section><p class="eyebrow" id="histDayLabel">그날 세션</p><div id="histSessions"></div></section>
 
     <section><p class="eyebrow">종료 사유 분포 <span class="sub">· 고부하</span></p><div id="reasonBox"></div></section>
 
@@ -688,7 +694,11 @@
     <div class="elapsed" id="editMeta"></div>
     <div class="field"><div class="label">시각 <span class="opt">시작 ~ 종료</span></div>
       <div class="subgrid"><input type="time" class="tin" id="edStart"><span class="muted" style="align-self:center">~</span><input type="time" class="tin" id="edEnd"></div>
-      <div class="hint" style="margin-top:6px">집중 시간(분)은 시작~종료로 자동 계산돼요.</div></div>
+      <div class="hint" style="margin-top:6px">시작·종료를 바꾸면 정지 시간은 그대로, 집중 시간이 바뀌어요.</div></div>
+    <div class="field"><div class="label">집중 시간 <span class="opt">정지를 뺀 시간(분)</span></div>
+      <div class="row" style="align-items:center; gap:10px"><input type="number" class="tin" id="edFocus" min="1" inputmode="numeric" style="width:96px"><span class="muted" style="font-size:13px" id="edFocusMax"></span></div>
+      <div class="hint" style="margin-top:6px">직접 바꾸면 시작·종료는 그대로, 정지 시간이 바뀌어요.</div>
+      <div class="hint" id="edPause" style="margin-top:4px; color:var(--muted)"></div></div>
     <div class="field"><div class="label">과목</div><div class="chips" id="edSubj"></div></div>
     <div class="field"><div class="label">작업 유형</div>
       <div class="chips" id="edLoad"><div class="chip" data-load="high">고부하</div><div class="chip" data-load="low">저부하</div></div></div>
@@ -841,7 +851,8 @@ function cutSession(r,cutAt){
   if(f<2*60000)return null;
   return {id:r.id,start:r.start,end,planned:r.planned,actual:Math.max(1,Math.round(f/60000)),
     pauses:st.pauses,subject:r.subject,load:r.load,cond:r.cond,reason:null,heat:null,onset:null,
-    dips:st.dips,quality:null,note:"자동 저장: 다른 기기에서 새 세션 시작",legacy:false};
+    dips:st.dips,quality:null,note:"자동 저장: 다른 기기에서 새 세션 시작",legacy:false,
+    pauseList:pauseRanges(r,end),pauseAdjMs:(r.carry&&r.carry.pausedMs)||0};
 }
 // 두 쪽(이 탭/기기 = m, 다른 탭/기기 = t)의 진행 중 세션을 하나로 정한다.
 //  · 이미 저장·취소된 세션 → 버림 (종료가 이김)
@@ -970,6 +981,40 @@ function subjLabel(x){return x||"과목 없음";}   // 과목을 안 고르고 �
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),1900);}
 
 function dipList(s){ if(Array.isArray(s.dips))return s.dips.slice(); if(s.dip!=null)return [s.dip]; return []; }
+/* ---- 세션 기록의 정지 시간 ----
+   pauseList  = [{from,to}] 정지 구간 (이 버전부터 저장. 언제 멈췄는지)
+   pauseAdjMs = 구간 말고 더해진 정지(ms). +면 '시각 모름' 정지(집중 시간을 직접 줄였거나, 구간 기록이 없던 예전 세션)
+                −면 기록된 정지 중 그만큼을 집중으로 바꾼 것(집중 시간을 직접 늘림)
+   정지 합계 = 구간 합(시작~끝 안쪽만) + pauseAdjMs (0 미만이면 0),  집중 시간 = (끝 − 시작) − 정지 합계 */
+function knownPauseMs(list,st,en){return (list||[]).reduce((t,p)=>t+Math.max(0,Math.min(en,p.to)-Math.max(st,p.from)),0);}
+function pauseAdjOf(s){
+  if(Number.isFinite(s.pauseAdjMs))return s.pauseAdjMs;
+  // 예전 기록: 시작~끝 길이에서 집중 시간을 뺀 나머지가 정지 (언제였는지는 모름)
+  return Math.max(0,(s.end-s.start)-(s.actual||0)*60000-knownPauseMs(s.pauseList,s.start,s.end));
+}
+function focusMinFor(st,en,list,adj){return Math.max(1,Math.round((en-st-Math.max(0,knownPauseMs(list,st,en)+adj))/60000));}
+function minText(ms){const m=Math.round(ms/60000);return m<1?"1분 미만":m+"분";}
+// 정지 설명: short = "정지 2회 13분", ranges = "10:15~10:22 (7분) · 10:40~10:46 (6분)", adj = "+ 시각 모름 7분" 등
+function pauseInfo(s,st,en,adj){
+  st=st??s.start;en=en??s.end;adj=adj??pauseAdjOf(s);
+  const list=(s.pauseList||[]).map(p=>({from:Math.max(st,p.from),to:Math.min(en,p.to)})).filter(p=>p.to>p.from);
+  const total=Math.max(0,knownPauseMs(list,st,en)+adj), tm=Math.round(total/60000), am=Math.round(adj/60000);
+  const short=tm>0?`정지 ${s.pauses?s.pauses+"회 ":""}${tm}분`:(s.pauses?`정지 ${s.pauses}회`:"");
+  const ranges=list.map(p=>`${clockOf(p.from)}~${clockOf(p.to)} (${minText(p.to-p.from)})`).join(" · ");
+  const adjTxt=am>0?(list.length?`+ 시각 모름 ${am}분`:`시각 모름 ${am}분`):am<0?`이 중 ${-am}분은 집중으로 수정`:"";
+  return {total,tm,short,ranges,adjTxt,list};
+}
+// 진행 중 세션의 버튼 기록으로 정지 구간 만들기 (until에 끝남. 그때 정지 중이었으면 until에서 끊음)
+function pauseRanges(r,until){
+  const out=[];let from=null;
+  for(const e of sortEvents(r.events)){
+    if(until!=null&&e.t>until)break;
+    if(e.type==="pause"){if(from==null)from=e.t;}
+    else if(e.type==="resume"){if(from!=null){if(e.t>from)out.push({from,to:e.t});from=null;}}
+  }
+  if(from!=null&&until!=null&&until>from)out.push({from,to:until});
+  return out;
+}
 function renderDipMarks(track,dips,planned){
   track.querySelectorAll(".dipmark").forEach(el=>el.remove());
   (dips||[]).forEach(m=>{const d=document.createElement("div");d.className="dipmark";
@@ -1173,7 +1218,9 @@ function commitEnd(){
     pauses:r.pauses, subject:r.subject, load:r.load, cond:r.cond,
     reason:endSel.reason, heat:endSel.reason==="cut"?endSel.heat:null,
     onset:(endSel.reason==="cut"&&endSel.heat==="yes")?endSel.onset:null,
-    dips:(r.dips||[]).slice(), quality:endSel.quality, note:$("#endNote").value.trim()||null, legacy:false});
+    dips:(r.dips||[]).slice(), quality:endSel.quality, note:$("#endNote").value.trim()||null, legacy:false,
+    // 언제 멈췄는지 남김. 이전 버전에서 넘어온 진행 중 세션의 정지 합계(시각 모름)는 pauseAdjMs로
+    pauseList:pauseRanges(r,endT), pauseAdjMs:(r.carry&&r.carry.pausedMs)||0});
   const dt=logicalDate(r.start);if(!S.days[dt])S.days[dt]={dayType:null,sleep:null};
   S.endedRuns=capEnded((S.endedRuns||[]).concat([r.id]));
   S.running=null;save();closeEnd();renderAll();syncSoon();
@@ -1191,6 +1238,8 @@ function openEdit(id){
   editSel={load:s.load, cond:s.cond, reason:s.reason, heat:s.heat, onset:s.onset, quality:s.quality, subject:s.subject};
   $("#editMeta").textContent=logicalDate(s.start)+(s.legacy?" · 레거시(가져온 기록)":"")+(s.pauses?` · 정지 ${s.pauses}회`:"");
   $("#edStart").value=clockOf(s.start);$("#edEnd").value=clockOf(s.end);
+  editT={s, st:s.start, en:s.end, adj:pauseAdjOf(s)};
+  $("#edFocus").value=s.actual;edRefresh(false);
   const sc=$("#edSubj");sc.innerHTML="";
   const subs=S.settings.subjects.concat((s.subject==null||S.settings.subjects.includes(s.subject))?[]:[s.subject]);
   // 고른 과목을 다시 누르면 해제 → 과목 없음
@@ -1213,14 +1262,43 @@ function reflectEdit(){
   $$("#edOnset .chip").forEach(c=>c.classList.toggle("on",+c.dataset.on===editSel.onset));
 }
 function closeEdit(){$("#editScrim").classList.remove("open");editId=null;}
-function commitEdit(){
-  const s=S.sessions.find(x=>x.id===editId);if(!s)return;
-  const base=parseYmd(logicalDate(s.start));
-  function mk(t){const[H,M]=t.split(":").map(Number);const d=new Date(base);d.setHours(H,M,0,0);
-    if(H<S.settings.dayStartHour)d.setDate(d.getDate()+1);return d.getTime();}
-  let st=mk($("#edStart").value), en=mk($("#edEnd").value);
+/* 수정창의 시간 계산. 규칙 두 개:
+   - 시작·종료를 바꾸면 → 정지 시간은 그대로, 집중 시간이 바뀜
+   - 집중 시간을 바꾸면 → 시작·종료는 그대로, 정지 시간이 바뀜 (정지 구간에 없는 차이는 '시각 모름' 정지) */
+let editT=null;   // {s: 고치는 세션, st, en: 시작·종료(ms), adj: 정지 보정(ms)}
+function edParse(){
+  const s=editT.s, base=parseYmd(logicalDate(s.start));
+  function mk(v,orig){
+    if(!v||v===clockOf(orig))return orig;   // 안 바꾼 칸은 원래 시각(초까지) 그대로
+    const[H,M]=v.split(":").map(Number);if(!Number.isFinite(H)||!Number.isFinite(M))return orig;
+    const d=new Date(base);d.setHours(H,M,0,0);if(H<S.settings.dayStartHour)d.setDate(d.getDate()+1);return d.getTime();}
+  const st=mk($("#edStart").value,s.start);let en=mk($("#edEnd").value,s.end);
   if(en<st)en+=86400000;
-  s.start=st;s.end=en;s.actual=Math.max(1,Math.round((en-st)/60000));
+  return {st,en};
+}
+function edFocusMax(){return Math.max(1,Math.round((editT.en-editT.st)/60000));}
+function edRefresh(updateFocus){
+  if(updateFocus)$("#edFocus").value=focusMinFor(editT.st,editT.en,editT.s.pauseList,editT.adj);
+  $("#edFocusMax").textContent=`최대 ${edFocusMax()}분 (시작~종료 길이)`;
+  const pz=pauseInfo(editT.s,editT.st,editT.en,editT.adj), am=Math.round(editT.adj/60000);
+  let t;
+  if(!pz.list.length)t=pz.tm>0?`정지 ${pz.tm}분 (언제였는지 기록 없음)`:"정지 없음";
+  else t=`정지 ${pz.tm}분 · ${pz.ranges}`+(am>0?` + 시각 모름 ${am}분`:am<0?` (이 중 ${-am}분은 집중으로 수정)`:"");
+  $("#edPause").textContent=t;
+}
+function edTimesChanged(){const t=edParse();editT.st=t.st;editT.en=t.en;edRefresh(true);}
+function edFocusChanged(){
+  const n=parseInt($("#edFocus").value,10);if(!Number.isFinite(n))return;
+  const f=Math.max(1,Math.min(edFocusMax(),n));
+  editT.adj=(editT.en-editT.st)-knownPauseMs(editT.s.pauseList,editT.st,editT.en)-f*60000;
+  edRefresh(false);
+}
+function commitEdit(){
+  const s=S.sessions.find(x=>x.id===editId);if(!s||!editT)return;
+  {const t=edParse();if(t.st!==editT.st||t.en!==editT.en){editT.st=t.st;editT.en=t.en;}}
+  {const n=parseInt($("#edFocus").value,10);if(Number.isFinite(n)&&n!==focusMinFor(editT.st,editT.en,s.pauseList,editT.adj))edFocusChanged();}
+  s.start=editT.st;s.end=editT.en;s.pauseAdjMs=editT.adj;
+  s.actual=focusMinFor(s.start,s.end,s.pauseList,s.pauseAdjMs);
   s.subject=editSel.subject;s.load=editSel.load;s.cond=editSel.cond;
   s.reason=editSel.reason;s.heat=editSel.reason==="cut"?editSel.heat:null;
   s.onset=(editSel.reason==="cut"&&editSel.heat==="yes")?editSel.onset:null;
@@ -1282,18 +1360,22 @@ function srow(s){
   if(s.quality)l2.push("질"+s.quality);
   if(s.cond)l2.push("컨디션 "+COND[s.cond]);
   {const dv=dipList(s); if(dv.length)l2.push("딥"+dv.join(",")+"분");}
-  if(s.pauses)l2.push("정지"+s.pauses);
+  const pz=pauseInfo(s);
+  if(pz.short)l2.push(pz.short);
   if(s.note)l2.push("📝"+s.note);
+  // 정지 구간이 기록돼 있으면 한 줄 더: 언제, 얼마나
+  const pzLine=pz.list.length?`⏸ ${pz.ranges}${pz.adjTxt?" "+pz.adjTxt:""}`:"";
   return `<div class="srow" data-id="${s.id}">
     <span class="dot" style="background:${color}"></span>
     <div class="body">
       <div class="line1"><span class="subj">${esc(subjLabel(s.subject))}</span> ${tag}
-        <span class="time">${clockOf(s.start)}~${clockOf(s.end)} · ${s.actual}분</span></div>
+        <span class="time">${clockOf(s.start)}~${clockOf(s.end)} · 집중 ${s.actual}분</span></div>
       <div class="line2">${l2.map(esc).join(" · ")}</div>
+      ${pzLine?`<div class="line2 pzline">${esc(pzLine)}</div>`:""}
     </div></div>`;
 }
 
-let weekOffset=0;
+let weekOffset=0, histDay=null;   // histDay: 기록 탭에서 고른 날
 function mondayOf(date){const d=parseYmd(date);const off=(d.getDay()+6)%7;d.setDate(d.getDate()-off);return d;}
 function renderHistory(){renderChart();renderReasons();renderHeat();}
 function renderChart(){
@@ -1302,6 +1384,8 @@ function renderChart(){
   const vals=days.map(highMinOn);
   const max=Math.max(60,...vals);
   const today=todayLogical();
+  // 고른 날이 이 주에 없으면: 이번 주면 오늘, 아니면 그 주에서 세션이 있는 마지막 날(없으면 월요일)
+  if(!days.includes(histDay))histDay=days.includes(today)?today:([...days].reverse().find(d=>sessionsOn(d).length)||days[0]);
   const label=weekOffset===0?"이번 주":weekOffset===-1?"지난 주":`${-weekOffset}주 전`;
   $("#wkLabel").textContent=label+` (${mon.getMonth()+1}/${mon.getDate()}~)`;
   $("#wkNext").disabled=weekOffset>=0;
@@ -1315,12 +1399,24 @@ function renderChart(){
     else{tip=`${WD[parseYmd(d).getDay()]} 기록 없음`;}
     const barH=v>0?h:(eff==="rest"||eff==="crash"?14:0);
     const isT=d===today?" today":"";
-    return `<div class="col"><div class="tip">${tip}</div>
+    return `<div class="col${d===histDay?" sel":""}" data-day="${d}"><div class="tip">${tip}</div>
       <div class="barwrap"><div class="bar ${cls}${isT}" style="height:${barH}%"></div></div>
       <div class="dl"><b>${WD[parseYmd(d).getDay()]}</b>${v>0?fmtHM(v):(eff==="rest"?"휴":eff==="crash"?"✕":"·")}</div></div>`;
   }).join("");
   const total=vals.reduce((a,b)=>a+b,0);
   $("#wkTotal").textContent=fmtHM(total)+`  (${total}분)`;
+  $$("#chart .col").forEach(c=>c.onclick=()=>{histDay=c.dataset.day;$$("#chart .col").forEach(x=>x.classList.toggle("sel",x===c));renderHistDay();});
+  renderHistDay();
+}
+// 기록 탭 아래쪽: 고른 날의 세션 목록 (누르면 수정창)
+function renderHistDay(){
+  const box=$("#histSessions");if(!box||!histDay)return;
+  const dd=parseYmd(histDay);
+  $("#histDayLabel").textContent=`${dd.getMonth()+1}/${dd.getDate()} (${WD[dd.getDay()]}) 세션`;
+  const list=sessionsOn(histDay);
+  if(!list.length){box.innerHTML='<div class="empty">이 날은 세션이 없어요.</div>';return;}
+  box.innerHTML=list.map(srow).join("");
+  box.querySelectorAll(".srow").forEach(r=>r.onclick=()=>openEdit(r.dataset.id));
 }
 function renderReasons(){
   const hi=S.sessions.filter(s=>s.load==="high"&&s.reason&&!s.legacy);
@@ -1376,7 +1472,10 @@ function buildText(){
         if(s.quality)p.push("질"+s.quality);
         if(s.cond)p.push("컨디션"+COND[s.cond]);
         {const dv=dipList(s); if(dv.length)p.push("딥"+dv.join("/")+"분");}
-        if(s.pauses)p.push("정지"+s.pauses);
+        {const pz=pauseInfo(s);   // 예: 정지2회·13분(10:15~10:22,10:40~10:46)
+          if(pz.short){const parts=pz.list.map(x=>clockOf(x.from)+"~"+clockOf(x.to));
+            if(pz.list.length&&pz.adjTxt)parts.push(pz.adjTxt.replace(/^\+ /,"").replace(/ /g,""));
+            p.push("정지"+(s.pauses?s.pauses+"회":"")+(pz.tm>0?(s.pauses?"·":"")+pz.tm+"분":"")+(parts.length?"("+parts.join(",")+")":""));}}
         if(s.note)p.push("메모:"+s.note);
       }
       L.push(" - "+p.join(" "));
@@ -1387,7 +1486,7 @@ function buildText(){
 }
 function cc(v){if(v==null)return"";const s=String(v);return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}
 function buildCSV(){
-  const head=["logical_date","weekday","day_type","sleep","sleep_hours","caffeine_mg","caffeine_detail","start","end","subject","load","planned_min","actual_min","reason","heat","overheat_onset_min","dip_min","quality","start_condition","pauses","gap_from_prev_min","note","legacy"];
+  const head=["logical_date","weekday","day_type","sleep","sleep_hours","caffeine_mg","caffeine_detail","start","end","subject","load","planned_min","actual_min","reason","heat","overheat_onset_min","dip_min","quality","start_condition","pauses","gap_from_prev_min","note","legacy","paused_min","pause_ranges"];
   const rows=[head.join(",")], prevEnd={};
   function cafOf(d){const c=(dayMeta(d).caffeine||[]).slice().sort((a,b)=>(a.t||"").localeCompare(b.t||""));return {sum:caffTotal(d),detail:c.map(x=>x.t+":"+x.mg).join(";")};}
   sortedSessions().forEach(s=>{
@@ -1395,10 +1494,12 @@ function buildCSV(){
     let gap="";if(prevEnd[d]!==undefined)gap=Math.round((s.start-prevEnd[d])/60000);prevEnd[d]=s.end;
     rows.push([d,WD[parseYmd(d).getDay()],effType(d)||"",m.sleep||"",m.sleepHours!=null?m.sleepHours:"",cf.sum||"",cf.detail,clockOf(s.start),clockOf(s.end),s.subject,
       s.load,s.planned,s.actual,s.reason||"",s.heat||"",s.onset||"",dipList(s).join(";"),s.quality||"",s.cond||"",
-      s.pauses||0,gap,s.note||"",s.legacy?1:0].map(cc).join(","));
+      s.pauses||0,gap,s.note||"",s.legacy?1:0,
+      (()=>{const pz=pauseInfo(s);return pz.tm;})(),
+      (()=>{const pz=pauseInfo(s);return pz.list.map(x=>clockOf(x.from)+"-"+clockOf(x.to)).join(";");})()].map(cc).join(","));
   });
   Object.keys(S.days).forEach(d=>{if(sessionsOn(d).length)return;const m=dayMeta(d),cf=cafOf(d);
-    rows.push([d,WD[parseYmd(d).getDay()],m.dayType||"",m.sleep||"",m.sleepHours!=null?m.sleepHours:"",cf.sum||"",cf.detail,"","","","","","","","","","","","","","","",""].map(cc).join(","));});
+    rows.push([d,WD[parseYmd(d).getDay()],m.dayType||"",m.sleep||"",m.sleepHours!=null?m.sleepHours:"",cf.sum||"",cf.detail,"","","","","","","","","","","","","","","","","",""].map(cc).join(","));});
   return rows.join("\n");
 }
 function copy(txt,msg){if(!txt){toast("내보낼 데이터가 없어요");return;}
@@ -1546,6 +1647,9 @@ function wire(){
   $("#edOnset").onclick=e=>{const c=e.target.closest(".chip");if(!c)return;editSel.onset=editSel.onset===+c.dataset.on?null:+c.dataset.on;reflectEdit();};
   $$("#edQual .chip").forEach(c=>c.onclick=()=>{editSel.quality=editSel.quality===+c.dataset.q?null:+c.dataset.q;reflectEdit();});
   $("#saveEdit").onclick=commitEdit;$("#cancelEdit").onclick=closeEdit;$("#delEdit").onclick=deleteEdit;
+  $("#edStart").addEventListener("input",edTimesChanged);$("#edEnd").addEventListener("input",edTimesChanged);
+  $("#edFocus").addEventListener("input",edFocusChanged);
+  $("#edFocus").addEventListener("blur",()=>{if(editT)$("#edFocus").value=focusMinFor(editT.st,editT.en,editT.s.pauseList,editT.adj);});
 
   $("#copyText").onclick=()=>copy(buildText(),"요약 복사됨 — AI에 붙여넣으세요");
   $("#copyCSV").onclick=()=>copy(buildCSV(),"CSV 복사됨");
