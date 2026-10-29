@@ -662,14 +662,14 @@
   <div class="sheet">
     <h2>세션 종료</h2>
     <div class="elapsed" id="endElapsed"></div>
-    <div class="field"><div class="label">어떻게 끝났나요?</div>
+    <div class="field"><div class="label">어떻게 끝났나요? <span class="opt">선택사항</span></div>
       <div class="chips" id="reasonChips">
         <div class="chip" data-r="full">세션 완료</div>
         <div class="chip warm" data-r="cut">중단</div>
       </div></div>
-    <div class="field" id="heatField" style="display:none"><div class="label">과열감이 있었나요?</div>
+    <div class="field" id="heatField" style="display:none"><div class="label">과열감이 있었나요? <span class="opt">선택사항</span></div>
       <div class="chips" id="heatChips"><div class="chip warm" data-h="yes">있음</div><div class="chip" data-h="no">없음</div></div></div>
-    <div class="field" id="onsetField" style="display:none"><div class="label">과열은 몇 분쯤부터?</div><div class="chips" id="onsetChips"></div></div>
+    <div class="field" id="onsetField" style="display:none"><div class="label">과열은 몇 분쯤부터? <span class="opt">선택사항</span></div><div class="chips" id="onsetChips"></div></div>
     <div class="field"><div class="label">세션 질 <span class="opt">선택사항</span></div>
       <div class="chips" id="qualChips">
         <div class="chip sm" data-q="1">1</div><div class="chip sm" data-q="2">2</div>
@@ -729,9 +729,9 @@ const WD=["일","월","화","수","목","금","토"];
 function defaultState(){return{
   version:2, theme:"dark",
   settings:{dayStartHour:0, defaultMinutes:46, restMinutes:10, autoRest:true,
-            subjects:["자료구조","시스템소프트웨어","개인 프로젝트","문제풀이","Anki"]},
-  sel:{subject:"자료구조", load:"high", cond:null},
-  sessions:[], days:{}, running:null
+            subjects:[]},   // 처음 쓰는 사람은 과목 없이 시작 (설정 > 과목 관리에서 추가)
+  sel:{subject:null, load:"high", cond:null},
+  sessions:[], days:{}, running:null, endedRuns:[]
 };}
 let S=defaultState();
 let AUTOSAVE=false;
@@ -792,13 +792,93 @@ function mergeAsSet(b,m,t){
     out.push(x);});
   return out;
 }
-// 진행 중 세션(running)은 칸별로 섞으면 안 되니 통째로: 내가 안 건드렸으면 상대 것, 건드렸으면 내 것
+/* ================= 진행 중 세션 (여러 기기 공유) =================
+   running = { id, start, planned, subject, load, cond,
+               events: [{id, t, type:"pause"|"resume"|"dip"}]  ← 버튼 누른 기록 (어느 기기에서 눌렀든 다 모음)
+               carry:  {pausedMs, pauses, dips}                 ← 이전 버전에서 넘어온 합계 (버튼 기록이 없던 시절 것)
+               alive:  어느 기기든 이 타이머가 마지막으로 살아 있던 시각
+               paused, pauseStart, pausedMs, pauses, dips       ← events를 시각 순서대로 다시 계산한 결과 (직접 안 바꿈) }
+   종료(저장)하면 세션 기록의 id = running.id. 저장·취소한 id는 endedRuns에도 남김 → 다른 기기가 "끝난 세션"임을 앎 */
+const ENDED_CAP=60;
+function cloneJ(v){return v==null?v:JSON.parse(JSON.stringify(v));}
+function sortEvents(evs){return (evs||[]).slice().sort((a,b)=>(a.t-b.t)||(String(a.id)<String(b.id)?-1:String(a.id)>String(b.id)?1:0));}
+// 버튼 기록을 시각 순서대로 다시 따라가며 상태 계산. until을 주면 그 시각까지만.
+// 같은 버튼이 겹치면(정지 중에 또 정지) 먼저 것만 반영
+function replayRun(r,until){
+  const c=r.carry||{};
+  let paused=false,pauseStart=null,pausedMs=c.pausedMs||0,pauses=c.pauses||0;
+  const dips=Array.isArray(c.dips)?c.dips.slice():[];
+  for(const e of sortEvents(r.events)){
+    if(until!=null&&e.t>until)break;
+    if(e.type==="pause"){if(!paused){paused=true;pauseStart=e.t;pauses++;}}
+    else if(e.type==="resume"){if(paused){pausedMs+=Math.max(0,e.t-pauseStart);paused=false;pauseStart=null;}}
+    else if(e.type==="dip"){const f=e.t-r.start-pausedMs-(paused?e.t-pauseStart:0);dips.push(Math.max(1,Math.round(f/60000)));}
+  }
+  return {paused,pauseStart,pausedMs,pauses,dips};
+}
+function recalcRun(r){if(!r)return r;Object.assign(r,replayRun(r));return r;}
+// 이전 버전 형식(버튼 기록 없음)도 받아서 새 형식으로. 같은 세션은 어느 탭에서 바꿔도 같은 결과가 나오게 id를 고정값으로
+function normRun(r){
+  if(!isPlainObj(r)||!Number.isFinite(r.start))return null;
+  if(!Array.isArray(r.events)){
+    const evs=[];
+    if(r.paused)evs.push({id:"legacy-p",t:r.pauseStart||r.lastTick||r.start,type:"pause"});
+    r.carry={pausedMs:r.pausedMs||0,pauses:Math.max(0,(r.pauses||0)-(r.paused?1:0)),dips:Array.isArray(r.dips)?r.dips.slice():[]};
+    r.events=evs;delete r.elapsedMs;
+  }
+  if(r.id==null)r.id="legacy-"+r.start;
+  return recalcRun(r);
+}
+function runEvent(type,t){return {id:uid(),t:t!=null?t:Date.now(),type};}
+function capEnded(a){const seen=new Set(),out=[];(a||[]).forEach(x=>{const k=String(x);if(!seen.has(k)){seen.add(k);out.push(k);}});return out.slice(-ENDED_CAP);}
+function endedIdSet(tr){const set=new Set();
+  ((tr&&tr.sessions)||[]).forEach(s=>{if(s&&s.id!=null)set.add(String(s.id));});
+  ((tr&&tr.endedRuns)||[]).forEach(id=>set.add(String(id)));return set;}
+// 먼저 시작한 세션을 cutAt(나중 세션 시작 시각)까지로 잘라 기록으로. 집중 2분 미만이면 null(버림)
+function cutSession(r,cutAt){
+  const end=Math.max(r.start,cutAt), st=replayRun(r,end);
+  const f=Math.max(0,end-r.start-st.pausedMs-(st.paused?Math.max(0,end-st.pauseStart):0));
+  if(f<2*60000)return null;
+  return {id:r.id,start:r.start,end,planned:r.planned,actual:Math.max(1,Math.round(f/60000)),
+    pauses:st.pauses,subject:r.subject,load:r.load,cond:r.cond,reason:null,heat:null,onset:null,
+    dips:st.dips,quality:null,note:"자동 저장: 다른 기기에서 새 세션 시작",legacy:false};
+}
+// 두 쪽(이 탭/기기 = m, 다른 탭/기기 = t)의 진행 중 세션을 하나로 정한다.
+//  · 이미 저장·취소된 세션 → 버림 (종료가 이김)
+//  · 같은 세션 → 버튼 기록을 합쳐서 누른 시각 순서대로 다시 계산
+//  · 서로 다른 세션 → 나중에 시작한 것 남김, 먼저 것은 잘라서 기록에 저장
+function mergeRunning(m,t,ended){
+  m=m?normRun(cloneJ(m)):null; t=t?normRun(cloneJ(t)):null;
+  if(m&&ended.has(String(m.id)))m=null;
+  if(t&&ended.has(String(t.id)))t=null;
+  if(!m||!t)return {running:m||t,superseded:null};
+  if(String(m.id)===String(t.id)){
+    const out=m, map=new Map();
+    m.events.concat(t.events).forEach(e=>{if(e&&e.id!=null&&!map.has(String(e.id)))map.set(String(e.id),e);});
+    out.events=sortEvents([...map.values()]);
+    out.alive=Math.max(m.alive||0,t.alive||0)||null;
+    return {running:recalcRun(out),superseded:null};
+  }
+  const tLater=t.start>m.start||(t.start===m.start&&String(t.id)>String(m.id));
+  return tLater?{running:t,superseded:m}:{running:m,superseded:t};
+}
+// 합친 결과(out)에 진행 중 세션을 정해서 넣는다. 밀려난 세션은 기록에 저장 + 끝난 목록에 추가
+function resolveRunning(out,mRun,tRun){
+  if(!isPlainObj(out))return null;
+  const res=mergeRunning(mRun,tRun,endedIdSet(out));
+  out.running=res.running||null;
+  if(res.superseded){
+    const sup=res.superseded;
+    if(!(out.sessions||[]).some(s=>s&&String(s.id)===String(sup.id))){
+      const cut=cutSession(sup,res.running.start);if(cut)out.sessions=(out.sessions||[]).concat([cut]);
+    }
+    out.endedRuns=capEnded((out.endedRuns||[]).concat([sup.id]));
+  }
+  return res;
+}
 function mergeTrackerState(b,m,t){
   const out=JSON.parse(JSON.stringify(merge3(b,m,t)));
-  if(isPlainObj(out)&&isPlainObj(m)&&isPlainObj(t)){
-    const bR=isPlainObj(b)?b.running:undefined;
-    out.running=sameVal(bR,m.running)?(t.running??null):(m.running??null);
-  }
+  if(isPlainObj(out)&&isPlainObj(m)&&isPlainObj(t))resolveRunning(out,m.running,t.running);
   return out;
 }
 function normalizeTracker(p){
@@ -807,6 +887,8 @@ function normalizeTracker(p){
   s.sel=Object.assign(defaultState().sel,p.sel||{});
   if(!Array.isArray(s.sessions))s.sessions=[];
   if(!isPlainObj(s.days))s.days={};
+  if(!Array.isArray(s.endedRuns))s.endedRuns=[];
+  s.running=s.running?normRun(s.running):null;
   return s;
 }
 
@@ -815,7 +897,7 @@ function normalizeTracker(p){
 // diskBase = 그때의 내용(합치기의 base). 저장된 게 없던 탭은 처음 띄운 기본값이 base.
 let lastDiskRaw=null, diskBase=undefined;
 function markDisk(raw){lastDiskRaw=raw;diskBase=JSON.parse(raw);}
-function save(){if(!AUTOSAVE)return;try{
+function save(){if(!AUTOSAVE)return;if(checkWiped())return;try{
   const disk=localStorage.getItem(KEY);
   if(disk!=null&&disk!==lastDiskRaw){
     S=normalizeTracker(mergeTrackerState(diskBase,S,JSON.parse(disk)));
@@ -827,7 +909,7 @@ function loadSaved(){if(!AUTOSAVE)return;try{const raw=localStorage.getItem(KEY)
   if(raw){S=normalizeTracker(JSON.parse(raw));markDisk(raw);}
   else diskBase=JSON.parse(JSON.stringify(S));}catch(e){}}
 // 다른 탭이 저장하면 브라우저가 알려줌 → 바로 합쳐서 화면에 반영
-function adoptFromDisk(){if(!AUTOSAVE)return;try{
+function adoptFromDisk(){if(!AUTOSAVE)return;if(checkWiped())return;try{
   const disk=localStorage.getItem(KEY);
   if(disk==null||disk===lastDiskRaw)return;
   const theirs=JSON.parse(disk);
@@ -840,10 +922,39 @@ function afterExternalChange(){
   try{
     applyTheme();renderAll();
     if(S.running){if(!S.running.paused)runTick();}
-    else if($("#endScrim").classList.contains("open"))closeEnd();
+    if($("#endScrim").classList.contains("open")&&endTargetGone())closeEnd();
   }catch(e){}
 }
 window.addEventListener("storage",e=>{if(e.storageArea===localStorage&&(e.key===KEY||e.key===null))adoptFromDisk();});
+
+/* ================= 로그아웃하면 이 기기 비우기 =================
+   로그아웃하면 이 브라우저에 있던 기록(세션추적기·투두·동기화 기준)을 지우고, WIPE_KEY에 새 값을 적는다.
+   같은 브라우저의 다른 탭은 그 값이 바뀐 걸 보고 들고 있던 옛 기록을 버린다 → 옛 기록을 저장소에 다시 써 넣지 않음.
+   (테마는 기록이 아니라 이 기기 화면 설정이라 남김) */
+const WIPE_KEY="wiped-at";
+function dataKeys(){return [KEY,SYNC_BASE_KEY,SEEN_KEY,"exercise-rotation-grid","study-rotation-grid","todo-max-count"];}
+function readWipe(){try{return localStorage.getItem(WIPE_KEY)||"";}catch(e){return "";}}
+let wipeSeen=readWipe();
+// 다른 탭이 비웠으면 이 탭도 비우고 true
+function checkWiped(){const w=readWipe();if(w===wipeSeen)return false;wipeSeen=w;resetLocalState();return true;}
+function resetLocalState(){
+  if(tickId){clearInterval(tickId);tickId=null;}
+  const th=S.theme;S=defaultState();S.theme=th;lastDiskRaw=null;diskBase=JSON.parse(JSON.stringify(S));
+  // 다시 로그인했을 때 클라우드에 진행 중 세션이 있으면, 꺼져 있던 시간 확인부터 다시 하게
+  restoreStarted=false;restoreDone=false;autoEndShownFor=null;
+  if(sbUser){sbUser=null;stopWatch();showLoggedOut();}
+  try{stopRest();closeEnd();closeEdit();}catch(e){}
+  if(window.todoSync&&window.todoSync.resetAll)window.todoSync.resetAll();
+  try{applyTheme();renderAll();}catch(e){}
+}
+function wipeLocalData(){
+  try{dataKeys().forEach(k=>localStorage.removeItem(k));}catch(e){}
+  wipeSeen=Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  try{localStorage.setItem(WIPE_KEY,wipeSeen);}catch(e){}
+  resetLocalState();
+  save();   // 테마만 남은 빈 상태 저장 (새로고침해도 테마 유지)
+}
+window.addEventListener("storage",e=>{if(e.storageArea===localStorage&&e.key===WIPE_KEY)checkWiped();});
 
 const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
 const pad=n=>String(n).padStart(2,"0");
@@ -855,6 +966,7 @@ function fmtMMSS(ms){let s=Math.max(0,Math.round(ms/1000));return{m:Math.floor(s
 function fmtHM(min){const h=Math.floor(min/60);return h+":"+pad(min%60);}
 function todayLogical(){return logicalDate(Date.now());}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
+function subjLabel(x){return x||"과목 없음";}   // 과목을 안 고르고 한 세션은 subject가 null
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),1900);}
 
 function dipList(s){ if(Array.isArray(s.dips))return s.dips.slice(); if(s.dip!=null)return [s.dip]; return []; }
@@ -961,34 +1073,55 @@ function lastSeen(){try{const v=parseInt(localStorage.getItem(SEEN_KEY)||"",10);
 function focusMs(r,now){if(!r)return 0;now=now||Date.now();
   const p=(r.pausedMs||0)+((r.paused&&r.pauseStart)?(now-r.pauseStart):0);
   return Math.max(0,now-r.start-p);}
+// 버튼을 누르거나 타이머가 돌아가는 동안 "살아 있음" 시각을 남김 (다른 기기와 공유됨)
+function bumpAlive(force){const r=S.running;if(!r)return;const now=Date.now();
+  if(force||!r.alive||now-r.alive>=60000||r.alive>now){r.alive=now;save();}}
+// 버튼 하나 누를 때마다 기록(events)에 추가 → 상태 다시 계산 → 저장 → 다른 기기로 바로 보냄
+function pushRunEvent(type,t){const r=S.running;if(!r)return;
+  r.events=(r.events||[]).concat([runEvent(type,t)]);recalcRun(r);r.alive=Math.max(r.alive||0,Date.now());}
 function startTimer(){
-  S.running={start:Date.now(), planned:S.settings.defaultMinutes, paused:false,
-    pauses:0, pausedMs:0, pauseStart:null, subject:S.sel.subject, load:S.sel.load, cond:S.sel.cond, dips:[]};
-  save();markSeen();runTick();renderTimer();
+  if(S.running){renderTimer();return;}
+  if(!restoreStarted){restoreStarted=true;restoreDone=true;}   // 방금 이 기기에서 시작 → 꺼져 있던 시간 확인할 게 없음
+  const now=Date.now();
+  S.running=recalcRun({id:uid(), start:now, planned:S.settings.defaultMinutes, subject:S.sel.subject, load:S.sel.load, cond:S.sel.cond,
+    events:[], carry:null, alive:now});
+  autoEndShownFor=null;
+  save();markSeen();runTick();renderTimer();syncSoon();
 }
-function pauseTimer(){if(!S.running||S.running.paused)return;S.running.paused=true;S.running.pauses++;S.running.pauseStart=Date.now();save();renderTimer();}
+function pauseTimer(){if(!S.running||S.running.paused)return;pushRunEvent("pause");save();renderTimer();syncSoon();}
 function resumeTimer(){if(!S.running||!S.running.paused)return;
-  if(S.running.pauseStart){S.running.pausedMs=(S.running.pausedMs||0)+(Date.now()-S.running.pauseStart);S.running.pauseStart=null;}
-  S.running.paused=false;save();markSeen();runTick();renderTimer();}
-function markDip(){if(!S.running)return;const m=Math.max(1,Math.round(focusMs(S.running)/60000));
-  if(!Array.isArray(S.running.dips))S.running.dips=[];S.running.dips.push(m);save();renderTimer();toast("딥 기록: "+S.running.dips.join(", ")+"분");beep(1);}
+  pushRunEvent("resume");save();markSeen();runTick();renderTimer();syncSoon();}
+function markDip(){if(!S.running)return;pushRunEvent("dip");
+  save();renderTimer();toast("딥 기록: "+S.running.dips.join(", ")+"분");beep(1);syncSoon();}
+// restoreDone 전(= 꺼져 있던 시간 확인 전)엔 화면만 갱신. 살아 있음 기록을 먼저 남기면 꺼져 있던 구간을 못 알아냄
+let restoreDone=false, autoEndShownFor=null;
 function runTick(){if(tickId)return;tickId=setInterval(()=>{
-  if(!S.running||S.running.paused){clearInterval(tickId);tickId=null;return;}
-  markSeen();
-  if(focusMs(S.running)>=S.running.planned*60000){clearInterval(tickId);tickId=null;beep(2);notify("세션 완료","계획한 시간이 끝났어요");renderTimer();openEnd("full");return;}
+  if(!S.running||S.running.paused){clearInterval(tickId);tickId=null;renderTimer();return;}
+  if(!restoreDone){renderTimer();return;}
+  markSeen();bumpAlive();
+  if(focusMs(S.running)>=S.running.planned*60000){clearInterval(tickId);tickId=null;renderTimer();
+    // 다른 기기 변경을 받을 때마다 다시 울리거나 종료창 입력을 지우지 않도록, 세션당 한 번만
+    if(autoEndShownFor!==S.running.id){autoEndShownFor=S.running.id;beep(2);notify("세션 완료","계획한 시간이 끝났어요");
+      if(!$("#endScrim").classList.contains("open"))openEnd("full");}
+    return;}
   renderTimer();
 },1000);}
-// 페이지가 꺼졌다 다시 열렸을 때 진행 중이던 세션 이어받기
+// 페이지가 꺼졌다 다시 열렸을 때 진행 중이던 세션 이어받기.
+// 로그인 상태면 첫 동기화가 끝난 뒤에 실행 → 다른 기기가 그동안 타이머를 살려두고 있었는지(alive)까지 보고 판단
+let restoreStarted=false;
+function restoreOnce(){if(restoreStarted)return;restoreStarted=true;restoreRunning();}
 function restoreRunning(){
-  const r=S.running; if(!r)return;
+  const r=S.running; if(!r){restoreDone=true;return;}
   // 백그라운드 탭에선 확인창이 제대로 안 뜰 수 있으니, 화면에 보일 때까지 기다렸다가 처리
   if(document.hidden){const h=()=>{if(!document.hidden){document.removeEventListener("visibilitychange",h);restoreRunning();}};
     document.addEventListener("visibilitychange",h);return;}
+  restoreDone=true;
   const now=Date.now();
   let seen=lastSeen(); if(seen==null||seen<r.start) seen=r.lastTick||r.start;   // 기록 없으면 이전 버전 값으로
+  if(r.alive&&r.alive>seen) seen=r.alive;                                         // 다른 기기에서 살아 있던 시각
+  (r.events||[]).forEach(e=>{if(e.t>seen)seen=e.t;});                             // 어느 기기든 버튼을 누른 시각
   seen=Math.min(seen,now);
   if(r.paused){
-    if(!r.pauseStart) r.pauseStart=seen;   // 이전 버전에서 넘어온 '정지인데 정지 시작 시각 없음' 보정
     save();renderTimer();toast("진행 중이던 세션을 이어받았어요 (일시정지 상태)");return;
   }
   const gap=now-seen;
@@ -998,19 +1131,21 @@ function restoreRunning(){
       +"이 시간도 공부 시간에 넣을까요?\n\n"
       +"확인 = 넣기 (타이머 그대로 계속)\n"
       +"취소 = 빼기 ("+clockOf(seen)+"부터 정지로 처리)");
+    if(!S.running||S.running.id!==r.id){renderAll();return;}   // 확인창 떠 있는 사이 다른 기기에서 끝냄
     if(!include){
-      r.paused=true;r.pauses=(r.pauses||0)+1;r.pauseStart=seen;
-      save();renderTimer();toast("꺼져 있던 시간은 정지로 처리했어요 · 계속을 누르면 이어서 재요");return;
+      pushRunEvent("pause",seen);
+      save();renderTimer();syncSoon();toast("꺼져 있던 시간은 정지로 처리했어요 · 계속을 누르면 이어서 재요");return;
     }
   }
-  save();markSeen();runTick();renderTimer();toast("진행 중이던 세션을 이어서 재고 있어요");
+  bumpAlive(true);markSeen();runTick();renderTimer();syncSoon();toast("진행 중이던 세션을 이어서 재고 있어요");
 }
 
-let endSel={reason:null,heat:null,onset:null,quality:null};
+let endSel={reason:null,heat:null,onset:null,quality:null}, endRunId=null;   // endRunId = 종료창을 연 세션
 function buildOnsetChips(container,maxMin){container.innerHTML="";const mx=Math.max(40,maxMin);
   for(let m=5;m<=mx;m+=5){const c=document.createElement("div");c.className="chip sm warm";c.dataset.on=m;c.textContent=m+"분"+(m===mx?"+":"");container.appendChild(c);}}
 function openEnd(pre){
   if(!S.running)return;
+  endRunId=S.running.id;
   endSel={reason:pre||null,heat:null,onset:null,quality:null};
   buildOnsetChips($("#onsetChips"),S.running.planned);
   $$("#reasonChips .chip").forEach(c=>c.classList.toggle("on",c.dataset.r===endSel.reason));
@@ -1020,30 +1155,35 @@ function openEnd(pre){
   $$("#qualChips .chip").forEach(c=>c.classList.remove("on"));
   $("#endNote").value="";$("#endNote").style.display="none";$("#noteToggle").textContent="+ 메모 (선택)";
   const el=fmtMMSS(focusMs(S.running));
-  $("#endElapsed").textContent=`집중 ${el.m}분 ${pad(el.s)}초 · ${LOAD[S.running.load]} · ${S.running.subject}`
+  $("#endElapsed").textContent=`집중 ${el.m}분 ${pad(el.s)}초 · ${LOAD[S.running.load]} · ${subjLabel(S.running.subject)}`
     +(S.running.pauses?` · 정지 ${S.running.pauses}회`:"")+((S.running.dips&&S.running.dips.length)?` · 딥 ${S.running.dips.join(",")}분`:"");
   $("#discardHint").innerHTML="";$("#cancelEnd").dataset.armed="";
   $("#endScrim").classList.add("open");
 }
 function closeEnd(){$("#endScrim").classList.remove("open");}
+// 종료창이 열려 있는 사이 다른 기기에서 이 세션을 끝내거나 다른 세션으로 바뀌었으면 true
+function endTargetGone(){return !S.running||String(S.running.id)!==String(endRunId);}
 function commitEnd(){
-  if(!S.running)return;
-  if(!endSel.reason){toast("종료 사유를 골라주세요");return;}
-  if(endSel.reason==="cut"&&!endSel.heat){toast("과열감 여부를 골라주세요");return;}
-  if(endSel.reason==="cut"&&endSel.heat==="yes"&&!endSel.onset){toast("과열 시작 시점을 골라주세요");return;}
+  if(endTargetGone()){closeEnd();renderAll();toast("다른 기기에서 이미 끝난 세션이에요");return;}
   const r=S.running, endT=Date.now();
   const actual=Math.max(1,Math.round(focusMs(r,endT)/60000));
-  S.sessions.push({id:uid(), start:r.start, end:endT, planned:r.planned, actual,
+  // 기록 id = 진행 중 세션 id → 두 기기가 같은 세션을 각자 저장해도 하나로 합쳐짐
+  S.sessions=S.sessions.filter(x=>String(x.id)!==String(r.id));
+  S.sessions.push({id:r.id, start:r.start, end:endT, planned:r.planned, actual,
     pauses:r.pauses, subject:r.subject, load:r.load, cond:r.cond,
     reason:endSel.reason, heat:endSel.reason==="cut"?endSel.heat:null,
     onset:(endSel.reason==="cut"&&endSel.heat==="yes")?endSel.onset:null,
     dips:(r.dips||[]).slice(), quality:endSel.quality, note:$("#endNote").value.trim()||null, legacy:false});
   const dt=logicalDate(r.start);if(!S.days[dt])S.days[dt]={dayType:null,sleep:null};
-  S.running=null;save();closeEnd();renderAll();
+  S.endedRuns=capEnded((S.endedRuns||[]).concat([r.id]));
+  S.running=null;save();closeEnd();renderAll();syncSoon();
   if(S.settings.autoRest!==false){ensureNotifyPerm();startRest();switchView("rest");}
   toast("세션 저장됨"+(AUTOSAVE?"":" · 백업 잊지 마세요"));
 }
-function discardRunning(){S.running=null;save();closeEnd();renderTimer();renderToday();toast("세션 취소됨 (저장 안 함)");}
+function discardRunning(){
+  if(endTargetGone()){closeEnd();renderAll();toast("다른 기기에서 이미 끝난 세션이에요");return;}
+  S.endedRuns=capEnded((S.endedRuns||[]).concat([S.running.id]));
+  S.running=null;save();closeEnd();renderTimer();renderToday();syncSoon();toast("세션 취소됨 (저장 안 함)");}
 
 let editId=null, editSel={};
 function openEdit(id){
@@ -1052,9 +1192,11 @@ function openEdit(id){
   $("#editMeta").textContent=logicalDate(s.start)+(s.legacy?" · 레거시(가져온 기록)":"")+(s.pauses?` · 정지 ${s.pauses}회`:"");
   $("#edStart").value=clockOf(s.start);$("#edEnd").value=clockOf(s.end);
   const sc=$("#edSubj");sc.innerHTML="";
-  const subs=S.settings.subjects.concat(S.settings.subjects.includes(s.subject)?[]:[s.subject]);
+  const subs=S.settings.subjects.concat((s.subject==null||S.settings.subjects.includes(s.subject))?[]:[s.subject]);
+  // 고른 과목을 다시 누르면 해제 → 과목 없음
   subs.forEach(n=>{const c=document.createElement("div");c.className="chip"+(s.subject===n?" on":"");c.textContent=n;c.dataset.subj=n;
-    c.onclick=()=>{editSel.subject=n;$$("#edSubj .chip").forEach(x=>x.classList.toggle("on",x===c));};sc.appendChild(c);});
+    c.onclick=()=>{editSel.subject=(editSel.subject===n)?null:n;$$("#edSubj .chip").forEach(x=>x.classList.toggle("on",x.dataset.subj===editSel.subject));};sc.appendChild(c);});
+  if(!subs.length)sc.innerHTML='<span class="hint">과목 없음 · 설정 &gt; 과목 관리에서 추가</span>';
   buildOnsetChips($("#edOnset"),Math.max(40,s.planned||46));
   reflectEdit();
   $("#edDip").value=dipList(s).join(", ");$("#edNote").value=s.note||"";
@@ -1088,7 +1230,7 @@ function commitEdit(){
   save();closeEdit();renderAll();toast("수정됨");
 }
 function deleteEdit(){const s=S.sessions.find(x=>x.id===editId);if(!s)return;
-  if(!confirm(`이 세션을 삭제할까요?\n${s.subject} · ${clockOf(s.start)} · ${s.actual}분`))return;
+  if(!confirm(`이 세션을 삭제할까요?\n${subjLabel(s.subject)} · ${clockOf(s.start)} · ${s.actual}분`))return;
   S.sessions=S.sessions.filter(x=>x.id!==editId);save();closeEdit();renderAll();toast("삭제됨");}
 
 function renderTimer(){
@@ -1102,7 +1244,7 @@ function renderTimer(){
   }
   const f=focusMs(S.running), pMs=planned*60000, remain=Math.max(0,pMs-f), t=fmtMMSS(remain);
   $("#clock").innerHTML=t.m+'<small>:'+pad(t.s)+'</small>';
-  $("#csub").textContent=(S.running.paused?"⏸ 일시정지 · ":"")+S.running.subject+" · "+LOAD[S.running.load]
+  $("#csub").textContent=(S.running.paused?"⏸ 일시정지 · ":"")+subjLabel(S.running.subject)+" · "+LOAD[S.running.load]
     +(S.running.pauses?` · 정지 ${S.running.pauses}`:"")+((S.running.dips&&S.running.dips.length)?` · 딥 ${S.running.dips.join(",")}분`:"");
   fill.style.width=Math.min(100,f/pMs*100)+"%";
   track.classList.toggle("hot",f/pMs>0.6);
@@ -1145,7 +1287,7 @@ function srow(s){
   return `<div class="srow" data-id="${s.id}">
     <span class="dot" style="background:${color}"></span>
     <div class="body">
-      <div class="line1"><span class="subj">${esc(s.subject)}</span> ${tag}
+      <div class="line1"><span class="subj">${esc(subjLabel(s.subject))}</span> ${tag}
         <span class="time">${clockOf(s.start)}~${clockOf(s.end)} · ${s.actual}분</span></div>
       <div class="line2">${l2.map(esc).join(" · ")}</div>
     </div></div>`;
@@ -1225,10 +1367,10 @@ function buildText(){
     L.push(`=== ${d} (${WD[parseYmd(d).getDay()]}) · ${eff?DAYTYPE[eff]:"미분류"}${m.sleep?" · 수면:"+SLEEP[m.sleep]+slh:(m.sleepHours!=null?" · 수면:"+m.sleepHours+"h":"")}${cafSum} ===`);
     L.push(`고부하 ${highMinOn(d)}분(${by[d].filter(s=>s.load==="high").length}) / 저부하 ${lowMinOn(d)}분(${by[d].filter(s=>s.load==="low").length})`);
     by[d].forEach(s=>{
-      let p=[`${clockOf(s.start)}~${clockOf(s.end)}`,s.subject,`[${LOAD[s.load]}]`,`${s.actual}분`];
+      let p=[`${clockOf(s.start)}~${clockOf(s.end)}`,subjLabel(s.subject),`[${LOAD[s.load]}]`,`${s.actual}분`];
       if(s.legacy)p.push("(레거시)");
       else{
-        let r=REASONS[s.reason]||"?";
+        let r=REASONS[s.reason]||"사유 없음";
         if(s.reason==="cut")r+=s.heat==="yes"?`(과열${s.onset?" "+s.onset+"분~":""})`:"(비과열)";
         p.push("종료:"+r);
         if(s.quality)p.push("질"+s.quality);
@@ -1267,22 +1409,24 @@ function renderSubjectChips(){
   const w=$("#subjChips");w.innerHTML="";
   S.settings.subjects.forEach(n=>{const c=document.createElement("div");c.className="chip"+(S.sel.subject===n?" on":"");
     c.textContent=n;c.onclick=()=>{S.sel.subject=n;save();renderSubjectChips();};w.appendChild(c);});
+  if(!S.settings.subjects.length)w.innerHTML='<span class="hint">없음 · 설정 &gt; 과목 관리에서 추가할 수 있어요 (없어도 시작 가능)</span>';
   const mg=$("#subjManage");mg.innerHTML="";
   S.settings.subjects.forEach(n=>{const c=document.createElement("div");c.className="chip sm";
     c.innerHTML=esc(n)+' <span class="faint">✕</span>';
-    c.onclick=()=>{if(S.settings.subjects.length<=1){toast("최소 1개는 필요해요");return;}
+    c.onclick=()=>{
       if(confirm(`'${n}' 과목을 목록에서 지울까요? (기존 기록은 남습니다)`)){
         S.settings.subjects=S.settings.subjects.filter(x=>x!==n);
-        if(S.sel.subject===n)S.sel.subject=S.settings.subjects[0];save();renderSubjectChips();}};mg.appendChild(c);});
+        if(S.sel.subject===n)S.sel.subject=S.settings.subjects[0]??null;save();renderSubjectChips();}};mg.appendChild(c);});
+  if(!S.settings.subjects.length)mg.innerHTML='<span class="hint">아직 과목이 없어요</span>';
 }
 function renderSelectors(){
   $$("#loadChips .chip").forEach(c=>c.classList.toggle("on",c.dataset.load===S.sel.load));
   $$("#condChips .chip").forEach(c=>c.classList.toggle("on",c.dataset.cond===S.sel.cond));
-  $("#minVal").value=S.settings.defaultMinutes;
+  if(document.activeElement!==$("#minVal"))$("#minVal").value=S.settings.defaultMinutes;
 }
 function renderSettings(){
   $("#dsVal").textContent=pad(S.settings.dayStartHour)+":00";
-  {const rv=$("#restVal");if(rv)rv.value=(S.settings.restMinutes||10);}
+  {const rv=$("#restVal");if(rv&&document.activeElement!==rv)rv.value=(S.settings.restMinutes||10);}
   $("#saveHint").innerHTML=(AUTOSAVE
     ?"자동저장 켜짐 — 이 브라우저/파일에 저장됩니다. 가끔 백업을 받아두면 더 안전해요."
     :"자동저장 꺼짐(미리보기) — <b>탭을 닫으면 사라집니다.</b> 이 HTML을 내려받아 로컬에서 열면 자동저장이 켜져요. 지금은 자주 <b>백업</b>하세요.")
@@ -1377,16 +1521,17 @@ function wire(){
   $("#cafAdd").onclick=addCaffeine;
   $("#cafMg").addEventListener("keydown",e=>{if(e.key==="Enter")addCaffeine();});
 
-  $$("#reasonChips .chip").forEach(c=>c.onclick=()=>{endSel.reason=c.dataset.r;
-    $$("#reasonChips .chip").forEach(x=>x.classList.toggle("on",x===c));
+  // 칩은 다시 누르면 선택 해제 (사유는 전부 선택사항)
+  $$("#reasonChips .chip").forEach(c=>c.onclick=()=>{endSel.reason=endSel.reason===c.dataset.r?null:c.dataset.r;
+    $$("#reasonChips .chip").forEach(x=>x.classList.toggle("on",x.dataset.r===endSel.reason));
     $("#heatField").style.display=endSel.reason==="cut"?"block":"none";
     if(endSel.reason!=="cut"){endSel.heat=null;endSel.onset=null;$("#onsetField").style.display="none";$$("#heatChips .chip").forEach(x=>x.classList.remove("on"));}});
-  $$("#heatChips .chip").forEach(c=>c.onclick=()=>{endSel.heat=c.dataset.h;
-    $$("#heatChips .chip").forEach(x=>x.classList.toggle("on",x===c));
+  $$("#heatChips .chip").forEach(c=>c.onclick=()=>{endSel.heat=endSel.heat===c.dataset.h?null:c.dataset.h;
+    $$("#heatChips .chip").forEach(x=>x.classList.toggle("on",x.dataset.h===endSel.heat));
     $("#onsetField").style.display=endSel.heat==="yes"?"block":"none";if(endSel.heat!=="yes"){endSel.onset=null;}});
-  $("#onsetChips").onclick=e=>{const c=e.target.closest(".chip");if(!c)return;endSel.onset=+c.dataset.on;
-    $$("#onsetChips .chip").forEach(x=>x.classList.toggle("on",x===c));};
-  $$("#qualChips .chip").forEach(c=>c.onclick=()=>{endSel.quality=+c.dataset.q;$$("#qualChips .chip").forEach(x=>x.classList.toggle("on",x===c));});
+  $("#onsetChips").onclick=e=>{const c=e.target.closest(".chip");if(!c)return;endSel.onset=endSel.onset===+c.dataset.on?null:+c.dataset.on;
+    $$("#onsetChips .chip").forEach(x=>x.classList.toggle("on",+x.dataset.on===endSel.onset));};
+  $$("#qualChips .chip").forEach(c=>c.onclick=()=>{endSel.quality=endSel.quality===+c.dataset.q?null:+c.dataset.q;$$("#qualChips .chip").forEach(x=>x.classList.toggle("on",+x.dataset.q===endSel.quality));});
   $("#noteToggle").onclick=()=>{const n=$("#endNote"),show=n.style.display==="none";n.style.display=show?"block":"none";
     $("#noteToggle").textContent=show?"− 메모":"+ 메모 (선택)";if(show)n.focus();};
   $("#saveEnd").onclick=commitEnd;
@@ -1396,10 +1541,10 @@ function wire(){
 
   $$("#edLoad .chip").forEach(c=>c.onclick=()=>{editSel.load=c.dataset.load;reflectEdit();});
   $$("#edCond .chip").forEach(c=>c.onclick=()=>{editSel.cond=editSel.cond===c.dataset.cond?null:c.dataset.cond;reflectEdit();});
-  $$("#edReason .chip").forEach(c=>c.onclick=()=>{editSel.reason=c.dataset.r;if(editSel.reason!=="cut"){editSel.heat=null;editSel.onset=null;}reflectEdit();});
-  $$("#edHeat .chip").forEach(c=>c.onclick=()=>{editSel.heat=c.dataset.h;if(editSel.heat!=="yes")editSel.onset=null;reflectEdit();});
-  $("#edOnset").onclick=e=>{const c=e.target.closest(".chip");if(!c)return;editSel.onset=+c.dataset.on;reflectEdit();};
-  $$("#edQual .chip").forEach(c=>c.onclick=()=>{editSel.quality=+c.dataset.q;reflectEdit();});
+  $$("#edReason .chip").forEach(c=>c.onclick=()=>{editSel.reason=editSel.reason===c.dataset.r?null:c.dataset.r;if(editSel.reason!=="cut"){editSel.heat=null;editSel.onset=null;}reflectEdit();});
+  $$("#edHeat .chip").forEach(c=>c.onclick=()=>{editSel.heat=editSel.heat===c.dataset.h?null:c.dataset.h;if(editSel.heat!=="yes")editSel.onset=null;reflectEdit();});
+  $("#edOnset").onclick=e=>{const c=e.target.closest(".chip");if(!c)return;editSel.onset=editSel.onset===+c.dataset.on?null:+c.dataset.on;reflectEdit();};
+  $$("#edQual .chip").forEach(c=>c.onclick=()=>{editSel.quality=editSel.quality===+c.dataset.q?null:+c.dataset.q;reflectEdit();});
   $("#saveEdit").onclick=commitEdit;$("#cancelEdit").onclick=closeEdit;$("#delEdit").onclick=deleteEdit;
 
   $("#copyText").onclick=()=>copy(buildText(),"요약 복사됨 — AI에 붙여넣으세요");
@@ -1446,7 +1591,7 @@ function wire(){
   $("#dsDown").onclick=()=>{S.settings.dayStartHour=(S.settings.dayStartHour+23)%24;save();renderSettings();renderAll();};
   $("#dsUp").onclick=()=>{S.settings.dayStartHour=(S.settings.dayStartHour+1)%24;save();renderSettings();renderAll();};
   $("#addSubj").onclick=()=>{const v=$("#newSubj").value.trim();if(!v)return;if(S.settings.subjects.includes(v)){toast("이미 있어요");return;}
-    S.settings.subjects.push(v);$("#newSubj").value="";save();renderSubjectChips();toast("추가됨");};
+    S.settings.subjects.push(v);if(!S.sel.subject)S.sel.subject=v;$("#newSubj").value="";save();renderSubjectChips();toast("추가됨");};
   $("#newSubj").addEventListener("keydown",e=>{if(e.key==="Enter")$("#addSubj").click();});
   $("#wipe").onclick=()=>{if(!confirm("모든 세션·설정을 삭제합니다. 되돌릴 수 없어요. 계속?"))return;
     if(!confirm("정말 삭제할까요? (백업을 먼저 받는 걸 권장)"))return;
@@ -1473,14 +1618,16 @@ function readTodoFromDisk(){
   let maxCount=null;try{const v=parseInt(localStorage.getItem("todo-max-count"),10);maxCount=isNaN(v)?null:v;}catch(e){}
   return {exercise:j("exercise-rotation-grid"), study:j("study-rotation-grid"), maxCount};
 }
-// 비교·합치기용 '내용'만 뽑기: 포장(format·savedAt)과 진행 중 타이머는 뺀다.
+// 비교·합치기용 '내용'만 뽑기: 포장(format·savedAt)은 뺀다. 진행 중 세션도 이제 같이 올림(다른 기기에서 보이게).
 // 예전 형식(세션추적기만 있는 백업, 예전 sync-base)도 읽을 수 있게.
 function contentOf(bundle){
   try{
     if(!bundle)return null;
     const tr=bundle.tracker?bundle.tracker:bundle;
     if(!tr||!Array.isArray(tr.sessions)||!tr.settings)return null;
-    const t=JSON.parse(JSON.stringify(tr));delete t.running;
+    const t=JSON.parse(JSON.stringify(tr));
+    t.running=t.running?normRun(t.running):null;
+    if(!Array.isArray(t.endedRuns))t.endedRuns=[];
     const td=(bundle.tracker&&bundle.todo)?bundle.todo:{};
     return {tracker:t, todo:{exercise:td.exercise??null, study:td.study??null, maxCount:td.maxCount??null}};
   }catch(e){return null;}
@@ -1488,7 +1635,7 @@ function contentOf(bundle){
 function localContent(){return contentOf({tracker:S, todo:readTodoFromDisk()});}
 // 아무것도 안 건드린 처음 상태. 처음 연결하는 기기에서 "누가 뭘 바꿨나"를 가리는 기준(base)으로 씀
 function defaultContent(){
-  const t=normalizeTracker(defaultState());delete t.running;
+  const t=normalizeTracker(defaultState());t.running=null;
   const td=(window.todoSync&&window.todoSync.defaults)?window.todoSync.defaults():{};
   return {tracker:t, todo:{exercise:td.exercise??null, study:td.study??null, maxCount:null}};
 }
@@ -1499,11 +1646,31 @@ function withTodoDefaults(c){
   if(c.todo.study==null)c.todo.study=d.todo.study;
   return c;
 }
-// 합친 결과를 이 브라우저에 반영 (진행 중 타이머는 그대로 둠)
-function applyContentLocally(c){
-  const run=S.running;
-  S=normalizeTracker(JSON.parse(JSON.stringify(c.tracker)));S.running=run;
+// 진행 중 세션의 '살아 있음' 시각만 다른지 (그것만 다르면 화면을 다시 그릴 필요 없음)
+function stripAlive(c){const x=cloneJ(c);if(x&&x.tracker&&x.tracker.running)delete x.tracker.running.alive;return x;}
+// 다른 기기에서 진행 중 세션이 바뀌었으면 한 줄로 알려줌
+function noteRunChange(prev,next,tr){
+  const pid=prev?String(prev.id):null, nid=next?String(next.id):null;
+  if(pid===nid){
+    if(prev&&next&&prev.paused!==next.paused)toast(next.paused?"다른 기기에서 정지했어요":"다른 기기에서 계속했어요");
+    else if(prev&&next&&(prev.dips||[]).length!==(next.dips||[]).length)toast("다른 기기에서 딥을 기록했어요");
+    return;
+  }
+  const saved=pid&&(tr.sessions||[]).some(s=>String(s.id)===pid);
+  if(pid&&nid)toast("다른 기기에서 시작한 세션으로 바뀌었어요"+(saved?" · 이 기기 세션은 기록에 저장됨":""));
+  else if(pid)toast(saved?"다른 기기에서 이 세션을 저장했어요":"다른 기기에서 이 세션을 취소했어요");
+  else toast("다른 기기에서 진행 중인 세션을 불러왔어요");
+}
+// 합친 결과를 이 브라우저에 반영 (진행 중 세션 포함)
+function applyContentLocally(c,localBefore){
+  if(localBefore&&sameVal(stripAlive(c),stripAlive(localBefore))){
+    if(S.running&&c.tracker.running){S.running.alive=c.tracker.running.alive;save();}
+    return;
+  }
+  const prev=S.running?cloneJ(S.running):null;
+  S=normalizeTracker(JSON.parse(JSON.stringify(c.tracker)));
   save();
+  noteRunChange(prev,S.running,S);
   try{
     const td=c.todo||{};
     if(td.exercise)localStorage.setItem("exercise-rotation-grid",JSON.stringify(td.exercise));
@@ -1529,16 +1696,17 @@ function markSynced(merged){
 }
 // 받기 → 합치기 → (바뀐 게 있으면) 올리기.
 // 올릴 때 "내가 받았던 그 버전일 때만 덮어써라"는 조건을 건다. 그 사이 다른 기기가 먼저 올렸으면 다시 받아서 합친다.
+// 끝까지 맞췄으면 true, 못 했으면 false (로그아웃 전에 다 올라갔는지 확인하는 데 씀)
 async function syncNow(){
-  if(!sb||!sbUser)return;
-  if(syncBusy){syncQueued=true;return;}
+  if(!sb||!sbUser||checkWiped())return false;
+  if(syncBusy){syncQueued=true;return false;}
   syncBusy=true;
   try{
     for(let attempt=1;attempt<=4;attempt++){
       flushLocal();
       const {data,error}=await sb.from("user_state").select("data,updated_at").eq("user_id",sbUser.id).maybeSingle();
-      if(error){setSyncStatus("동기화 오류: "+error.message);return;}
-      if(!sbUser)return;
+      if(error){setSyncStatus("동기화 오류: "+error.message);return false;}
+      if(!sbUser||checkWiped())return false;   // 기다리는 사이 로그아웃했으면 클라우드 것을 이 기기에 넣지 않음
       flushLocal();   // 기다리는 동안 바뀐 것까지 포함
       const local=rollTodo(withTodoDefaults(localContent()));
       const cloud=data?rollTodo(withTodoDefaults(contentOf(data.data))):null;
@@ -1548,8 +1716,10 @@ async function syncNow(){
       else if(base)merged=merge3(base,local,cloud);
       else merged=merge3(defaultContent(),cloud,local);   // 이 기기 첫 연결: 양쪽에서 바꾼 것 다 살리고, 같은 칸이 겹치면 클라우드 것
       merged=JSON.parse(JSON.stringify(merged));
-      if(!sameVal(merged,local))applyContentLocally(merged);
-      if(cloud&&sameVal(merged,cloud)){markSynced(merged);return;}
+      // 진행 중 세션은 칸별로 섞지 않고 규칙대로 하나를 정함 (종료 이김 / 같은 세션은 버튼 기록 합침 / 다른 세션은 나중 것)
+      if(cloud)resolveRunning(merged.tracker,local.tracker.running,cloud.tracker.running);
+      if(!sameVal(merged,local))applyContentLocally(merged,local);
+      if(cloud&&sameVal(merged,cloud)){markSynced(merged);return true;}
       const row={data:Object.assign({format:"study-hub-backup",version:1,savedAt:new Date().toISOString()},merged),updated_at:newStamp()};
       let res;
       if(!data||attempt===4){
@@ -1558,10 +1728,12 @@ async function syncNow(){
         res=await sb.from("user_state").update(row).eq("user_id",sbUser.id).eq("updated_at",data.updated_at).select("user_id");
         if(!res.error&&(!res.data||!res.data.length))continue;   // 그 사이 다른 기기가 먼저 올림 → 다시
       }
-      if(res.error){setSyncStatus("저장 실패: "+res.error.message);return;}
-      markSynced(merged);return;
+      if(res.error){setSyncStatus("저장 실패: "+res.error.message);return false;}
+      if(checkWiped())return false;
+      markSynced(merged);return true;
     }
-  }catch(e){setSyncStatus("동기화 오류");}
+    return false;
+  }catch(e){setSyncStatus("동기화 오류");return false;}
   finally{syncBusy=false;if(syncQueued){syncQueued=false;setTimeout(syncNow,200);}}
 }
 function setSyncStatus(t){ const el=$("#syncStatus"); if(el) el.textContent=t; }
@@ -1571,7 +1743,7 @@ function showLoggedIn(){ const a=$("#syncOut"),b=$("#syncIn"); if(a)a.style.disp
 
 function initSync(){
   try{
-    if(!window.supabase || !window.supabase.createClient){ setSyncStatus("오프라인 — 동기화 기능을 못 불러왔어요 (인터넷 확인 후 새로고침)"); return; }
+    if(!window.supabase || !window.supabase.createClient){ setSyncStatus("오프라인 — 동기화 기능을 못 불러왔어요 (인터넷 확인 후 새로고침)"); restoreOnce(); return; }
     sb=window.supabase.createClient(SB_URL, SB_KEY);
     const lg=$("#syncLogin"), sg=$("#syncSignup"), lo=$("#syncLogout"), pw=$("#syncPw");
     if(lg) lg.onclick=doLogin;
@@ -1580,14 +1752,14 @@ function initSync(){
     if(pw) pw.addEventListener("keydown",e=>{ if(e.key==="Enter") doLogin(); });
     sb.auth.getSession().then(({data})=>{
       if(data && data.session){ sbUser=data.session.user; onLoggedIn(); }
-      else { showLoggedOut(); }
-    }).catch(()=>{ showLoggedOut(); });
+      else { showLoggedOut(); restoreOnce(); }
+    }).catch(()=>{ showLoggedOut(); restoreOnce(); });
     sb.auth.onAuthStateChange((_e,session)=>{
       const u=session?session.user:null;
       if(u && (!sbUser || sbUser.id!==u.id)){ sbUser=u; onLoggedIn(); }
       else if(!u && sbUser){ sbUser=null; stopWatch(); try{localStorage.removeItem(SYNC_BASE_KEY);}catch(e){} showLoggedOut(); }
     });
-  }catch(e){ setSyncStatus("동기화 초기화 실패"); }
+  }catch(e){ setSyncStatus("동기화 초기화 실패"); restoreOnce(); }
 }
 async function doSignup(){
   try{
@@ -1609,15 +1781,37 @@ async function doLogin(){
     if(error){ setSyncStatus("로그인 실패: "+error.message); return; }
   }catch(e){ setSyncStatus("로그인 중 오류"); }
 }
-async function doLogout(){ try{ await sb.auth.signOut(); }catch(e){} toast("로그아웃됨"); }
+// 로그아웃: 먼저 클라우드에 다 올리고 → 이 브라우저만 로그아웃 → 이 기기 기록 비우기.
+// 못 올렸으면(인터넷 끊김 등) 로그아웃하지 않음 → 안 올라간 기록이 사라지지 않게.
+let loggingOut=false;
+async function doLogout(){
+  if(loggingOut||!sb||!sbUser)return;
+  // 진행 중 세션도 클라우드에 같이 올라가므로 지우지 않음: 다른 기기나 다시 로그인했을 때 이어짐
+  if(S.running&&!confirm("진행 중인 세션이 있어요.\n로그아웃해도 이 세션은 클라우드에 남아서, 다른 기기나 다시 로그인했을 때 이어져요.\n\n로그아웃할까요?"))return;
+  loggingOut=true;const btn=$("#syncLogout");if(btn)btn.disabled=true;
+  try{
+    setSyncStatus("로그아웃 전에 클라우드에 올리는 중…");
+    for(let i=0;i<150&&syncBusy;i++)await new Promise(r=>setTimeout(r,100));   // 하던 동기화가 끝나길 기다림
+    const ok=await syncNow();
+    if(!ok){setSyncStatus("클라우드에 못 올려서 로그아웃하지 않았어요. 인터넷 연결을 확인하고 다시 눌러 주세요.");toast("로그아웃 안 됨 — 업로드 실패");return;}
+    const {error}=await sb.auth.signOut({scope:"local"});
+    if(error){setSyncStatus("로그아웃 실패: "+error.message);return;}
+    sbUser=null;stopWatch();showLoggedOut();
+    wipeLocalData();
+    toast("로그아웃됨 — 이 기기의 기록을 비웠어요");
+  }catch(e){setSyncStatus("로그아웃 중 오류");}
+  finally{loggingOut=false;if(btn)btn.disabled=false;}
+}
 
 async function onLoggedIn(){
   showLoggedIn();
   setSyncStatus("동기화 확인 중…");
-  await syncNow();
+  try{ await syncNow(); }finally{ restoreOnce(); }   // 꺼져 있던 시간 확인은 다른 기기 상태를 받은 뒤에
   startWatch();
 }
-// 이 브라우저에서 뭔가 바뀌면 5초 안에 올리고, 화면이 보이는 동안 30초마다 다른 기기 변경을 받아온다.
+// 이 브라우저에서 뭔가 바뀌면 5초 안에 올리고, 화면이 보이는 동안 다른 기기 변경을 받아온다.
+// 받아오는 간격: 세션 진행 중이면 10초, 아니면 30초
+let lastPoll=0;
 function startWatch(){
   stopWatch();
   lastWatchJSON=stableStr(localContent());
@@ -1626,8 +1820,13 @@ function startWatch(){
     const j=stableStr(localContent());
     if(j!==lastWatchJSON){lastWatchJSON=j;syncNow();}
   },5000);
-  pollTimer=setInterval(()=>{if(sbUser&&!document.hidden)syncNow();},30000);
+  pollTimer=setInterval(()=>{
+    if(!sbUser||document.hidden)return;
+    if(S.running||Date.now()-lastPoll>=30000){lastPoll=Date.now();syncNow();}
+  },10000);
 }
+// 정지·계속·종료처럼 다른 기기가 빨리 알아야 하는 조작 직후 바로 동기화
+function syncSoon(){if(sbUser)setTimeout(syncNow,300);}
 function stopWatch(){if(syncTimer){clearInterval(syncTimer);syncTimer=null;}if(pollTimer){clearInterval(pollTimer);pollTimer=null;}}
 document.addEventListener("visibilitychange",()=>{if(sbUser)syncNow();});
 window.addEventListener("pagehide",()=>{if(sbUser)syncNow();});
@@ -1636,7 +1835,8 @@ window.addEventListener("pagehide",()=>{if(sbUser)syncNow();});
 loadSaved();applyTheme();
 $("#autostatus").className="status "+(AUTOSAVE?"on":"off");
 $("#autostatus").textContent=AUTOSAVE?"자동저장 ON":"미리보기·수동백업";
-wire();renderAll();restoreRunning();initSync();
+wire();renderAll();runTick();initSync();
+setTimeout(restoreOnce,8000);   // 동기화가 너무 오래 걸리면 기다리지 않고 진행
 </script>
 <script>
 
@@ -1722,12 +1922,14 @@ wire();renderAll();restoreRunning();initSync();
     return `${a.getMonth() + 1}/${a.getDate()}~${b.getMonth() + 1}/${b.getDate()}`;
   }
 
-  // 표 정의: items는 이제 기본값일 뿐, 실제 목록은 state.items에 저장되어 편집 가능.
+  // 표 정의: 처음 쓰는 사람은 항목 없이 시작(defaultItems 비어 있음). 실제 목록은 state.items에 저장되어 편집 가능.
+  // legacyItems: 항목 목록(items)이 없던 예전 저장본을 읽을 때만 쓰는 옛 기본 항목 (그때는 이 이름들이 고정이었음)
   const TRACKERS = [
     {
       cardId: "wt-card-workout",
       storageKey: "exercise-rotation-grid",
-      defaultItems: [
+      defaultItems: [],
+      legacyItems: [
         { key: "pushup", label: "푸쉬업" },
         { key: "splitsquat", label: "스플릿 스쿼트" },
         { key: "bicep", label: "바이셉 마이오렙" },
@@ -1739,7 +1941,8 @@ wire();renderAll();restoreRunning();initSync();
     {
       cardId: "wt-card-study",
       storageKey: "study-rotation-grid",
-      defaultItems: [
+      defaultItems: [],
+      legacyItems: [
         { key: "ds", label: "자료구조" },
         { key: "sysprog", label: "시스템 소프트웨어" },
         { key: "project", label: "프로젝트" },
@@ -1795,6 +1998,7 @@ wire();renderAll();restoreRunning();initSync();
     }
     function writeNow() {
       clearTimeout(saveTimer); saveTimer = null;
+      if (typeof checkWiped === "function" && checkWiped()) return;   // 다른 탭에서 로그아웃해 비웠으면 옛 기록을 다시 쓰지 않음
       try {
         const disk = readDisk();
         if (disk != null && disk !== lastDiskRaw) { mergeFromDisk(disk); setTimeout(render, 0); }
@@ -1809,6 +2013,7 @@ wire();renderAll();restoreRunning();initSync();
     }
     // 다른 탭이 저장했거나, 클라우드에서 합친 결과가 저장소에 들어왔을 때
     function reloadFromDisk() {
+      if (typeof checkWiped === "function" && checkWiped()) return;
       try {
         const disk = readDisk();
         if (disk == null || disk === lastDiskRaw) return;
@@ -1822,7 +2027,13 @@ wire();renderAll();restoreRunning();initSync();
     window.addEventListener("storage", (e) => {
       if (e.storageArea === localStorage && (e.key === storageKey || e.key === null)) reloadFromDisk();
     });
-    todoApis.push({ storageKey, defaults: defaultState, flush() { if (saveTimer) writeNow(); }, reload: reloadFromDisk });
+    // 로그아웃으로 이 기기 데이터를 비울 때: 저장 대기 취소하고 빈 표로 (저장소에는 아무것도 안 씀)
+    function resetToBlank() {
+      clearTimeout(saveTimer); saveTimer = null;
+      state = defaultState(); lastDiskRaw = null; diskBase = JSON.parse(JSON.stringify(state));
+      render();
+    }
+    todoApis.push({ storageKey, defaults: defaultState, flush() { if (saveTimer) writeNow(); }, reload: reloadFromDisk, reset: resetToBlank });
 
     // ── 집계 ──
     function activeDays() { return state.rest.filter((r) => !r).length; }
@@ -1916,7 +2127,6 @@ wire();renderAll();restoreRunning();initSync();
       inp.addEventListener("blur", () => commit(true));
     }
     function deleteRow(ex) {
-      if (state.items.length <= 1) { alert("최소 1개 항목은 있어야 해요."); return; }
       if (!confirm(`'${ex.label}' 항목을 삭제할까요? (기록도 함께 지워집니다)`)) return;
       state.items = state.items.filter((x) => x.key !== ex.key);
       delete state.grid[ex.key];
@@ -2008,7 +2218,7 @@ wire();renderAll();restoreRunning();initSync();
         const el = footRow.querySelector(`[data-col-total="${d}"]`);
         if (!el) continue;
         if (state.rest[d]) { el.textContent = "휴"; el.classList.remove("is-full"); el.classList.add("is-rest"); }
-        else { el.textContent = colSessions(d); el.classList.remove("is-rest"); el.classList.toggle("is-full", colDoneItems(d) === state.items.length); }
+        else { el.textContent = colSessions(d); el.classList.remove("is-rest"); el.classList.toggle("is-full", state.items.length > 0 && colDoneItems(d) === state.items.length); }
       }
       if (totalEl) totalEl.textContent = filledCells();
       if (denEl) denEl.textContent = `/ ${state.items.length * active}`;
@@ -2049,15 +2259,17 @@ wire();renderAll();restoreRunning();initSync();
         setTimeout(() => { resetConfirming = false; resetBtn.textContent = "초기화"; resetBtn.classList.remove("wt-confirming"); }, 2500);
         return;
       }
-      state = defaultState(); render(); scheduleSave();
+      // 기록(숫자·쉬는날)만 지우고 항목 목록은 남김 (기본 항목이 비어 있어서, 통째로 기본값으로 돌리면 항목이 다 사라짐)
+      { const items = state.items; state = defaultState(); state.items = items; state.grid = blankGridFor(items); }
+      render(); scheduleSave();
       resetConfirming = false; resetBtn.textContent = "초기화"; resetBtn.classList.remove("wt-confirming");
     });
 
     // 저장된 모양 → 화면용 state (예전 형식도 변환)
     function fromSaved(p) {
       const st = defaultState();
-      // 신버전: items 포함
-      if (p && Array.isArray(p.items) && p.items.length) {
+      // 신버전: items 포함 (항목을 다 지운 빈 목록도 신버전)
+      if (p && Array.isArray(p.items)) {
         st.items = p.items.map((x) => ({ key: x.key, label: x.label }));
         st.grid = blankGridFor(st.items);
         st.items.forEach((ex) => {
@@ -2069,7 +2281,7 @@ wire();renderAll();restoreRunning();initSync();
       }
       // 구버전: items 없음, grid는 기본 키 기준 7칸 → 이번주(뒤7)로 이관
       else if (p && p.grid) {
-        st.items = config.defaultItems.map((x) => ({ key: x.key, label: x.label }));
+        st.items = config.legacyItems.map((x) => ({ key: x.key, label: x.label }));
         st.grid = blankGridFor(st.items);
         st.items.forEach((ex) => {
           const arr = p.grid[ex.key];
@@ -2122,6 +2334,7 @@ wire();renderAll();restoreRunning();initSync();
   window.todoSync = {
     flush() { todoApis.forEach((a) => a.flush()); },
     reload() { todoApis.forEach((a) => a.reload()); reloadMaxFromDisk(); },
+    resetAll() { MAX_SESSIONS = 4; todoApis.forEach((a) => a.reset()); },
     roll: rollSaved,
     defaults() {
       const out = {};
